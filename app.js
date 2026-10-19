@@ -86,8 +86,9 @@
 
   // ───────── state ─────────
   var S = {
-    token: ls('token'), data: null, view: 'leads', campaign: null, filter: 'open', q: '', person: '',
-    selId: null, edit: null, sheet: null, dashScope: null, dashCamp: null,
+    token: ls('token'), data: null, view: 'leads', campaign: null, filter: 'open', q: '', person: null, statusF: '',
+    past: {}, pastLoading: {}, touched: {}, dirty: false,
+    selId: null, edit: null, sheet: null, dashScope: null, dashCamp: undefined,
     login: { names: null, name: ls('lastName') || '', pin: '', stage: 'enter', first: '', msg: '', err: false, busy: false },
     prevSeen: ls('seen') || 0, saving: false, ahIdx: -1
   };
@@ -116,29 +117,33 @@
   function isClosed(l) { return closedList().indexOf(l.status) >= 0; }
   function activeCamps() { return D().campaigns.filter(function (c) { return c.active && !c.unsorted; }); }
   function campByName(n) { return D().campaigns.filter(function (c) { return c.name === n; })[0]; }
-  function campLabel(n) { if (n === '__active') return 'All live campaigns'; if (n === '') return 'Unsorted leads'; return n; }
-  function defaultCampaign() {
-    var a = activeCamps();
-    if (a.length === 1) return a[0].name;
-    if (a.length > 1) return '__active';
-    var c = D().campaigns.filter(function (x) { return !x.unsorted; }).slice().sort(function (x, y) { return (y.expiry || '').localeCompare(x.expiry || ''); })[0];
-    return c ? c.name : '__active';
+  function campLabel(n) { if (n == null || n === '__live') return 'All live campaigns'; if (n === '') return 'Unsorted leads'; return n; }
+  function isLiveCamp(n) { var c = campByName(n); return !!(c && !c.unsorted && (c.active || c.upcoming)); }
+  // live campaigns' leads come with the data; a past campaign's leads load when someone opens it
+  function leadsOf(camp) {
+    if (camp == null) return D().leads;
+    if (isLiveCamp(camp)) return D().leads.filter(function (l) { return l.campaign === camp; });
+    return S.past[camp] || null;
   }
-  function inCampaign(l, sel) {
-    sel = sel == null ? S.campaign : sel;
-    if (sel === '__active') return activeCamps().some(function (c) { return c.name === l.campaign; });
-    return l.campaign === sel;
+  function loadPast(camp) {
+    if (S.past[camp] || S.pastLoading[camp]) return;
+    S.pastLoading[camp] = true;
+    api('campaignLeads', { campaign: camp }).then(function (r) {
+      S.pastLoading[camp] = false; S.past[camp] = r.leads; rerenderKeepScroll();
+    }).catch(function (e) { S.pastLoading[camp] = false; toast(e.message, true); });
+  }
+  function personOf() { return S.person == null ? (isAdmin() ? '' : 'me') : S.person; }
+  function personLabel(p) {
+    p = p == null ? personOf() : p;
+    return p === 'me' ? 'My leads' : (p === '' ? 'All team' : (p === '__none' ? 'Unassigned' : p));
   }
   function scopedLeads() {
-    var me = D().me.name;
-    return D().leads.filter(function (l) {
-      if (!inCampaign(l)) return false;
-      if (isAdmin()) {
-        if (S.person === '__none') return !l.assigned;
-        if (S.person) return l.assigned === S.person;
-        return true;
-      }
-      return l.assigned === me;
+    var me = D().me.name, p = personOf();
+    return (leadsOf(S.campaign) || []).filter(function (l) {
+      if (p === 'me') return l.assigned === me;
+      if (p === '__none') return !l.assigned;
+      if (p) return l.assigned === p;
+      return true;
     });
   }
   function fuState(l) {
@@ -167,6 +172,7 @@
     var q = S.q.trim().toLowerCase(), qd = q.replace(/\D/g, '');
     var out = list.filter(function (l) {
       var f = fuState(l), cl = isClosed(l);
+      if (S.statusF && l.status !== S.statusF) return false;
       switch (S.filter) {
         case 'open': if (cl) return false; break;
         case 'new': if (cl || !/^New/.test(l.status)) return false; break;
@@ -193,7 +199,31 @@
     });
     return out;
   }
-  function findLead(id) { return D().leads.filter(function (l) { return l.id === id; })[0]; }
+  function findLead(id) {
+    var l = D().leads.filter(function (x) { return x.id === id; })[0];
+    if (l) return l;
+    for (var k in S.past) { l = (S.past[k] || []).filter(function (x) { return x.id === id; })[0]; if (l) return l; }
+    return null;
+  }
+  function tint(l) { return l.status === 'Confirmed' ? ' won' : (/^Lost|Not Potential/.test(l.status) ? ' lost' : ''); }
+
+  // people: photo (from the Users tab "Photo" column) or coloured initials
+  var AVC = ['#002F61', '#06937E', '#686B8C', '#007293', '#9B2242', '#00614F', '#8A6D3B', '#4A5463'];
+  function avColor(n) { var x = 0; for (var i = 0; i < n.length; i++) x = (x * 31 + n.charCodeAt(i)) % 9973; return AVC[x % AVC.length]; }
+  function userBy(n) { return ((D() && D().users) || []).filter(function (u) { return u.name === n; })[0]; }
+  function photoUrl(u) {
+    var p = u && u.photo; if (!p) return '';
+    var m = p.match(/(?:\/d\/|[?&]id=)([\w-]{20,})/);
+    if (m && /google\.com/.test(p)) return 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w200';
+    return /^https?:\/\//.test(p) ? p : '';
+  }
+  function av(name, size) {
+    var st = size ? ';width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.36) + 'px' : '';
+    if (!name) return '<span class="av none" title="Unassigned" style="' + st.slice(1) + '">–</span>';
+    var src = photoUrl(userBy(name));
+    return '<span class="av" title="' + h(name) + '" style="background:' + avColor(name) + st + '">' + h(initials(name)) +
+      (src ? '<img src="' + h(src) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') + '</span>';
+  }
 
   // ───────── rendering ─────────
   function render() {
@@ -202,13 +232,14 @@
     if (S.sheet && !isDesktop()) html += sheetHtml();
     else if (S.sheet && S.sheet.type !== 'lead') html += sheetHtml();
     APP.innerHTML = html;
+    if (S.sheet) S.sheet.fresh = false;   // slide up only when it first opens
   }
   function isDesktop() { return window.matchMedia('(min-width: 1024px)').matches; }
 
   function navItems() {
     var c = counts(myOwnLeads());
     return [
-      { v: 'leads', label: isAdmin() ? 'Leads' : 'My Leads', icon: I.leads, count: c.open },
+      { v: 'leads', label: 'Leads', icon: I.leads, count: c.open },
       { v: 'reminders', label: 'Reminders', icon: I.cal, badge: c.over },
       { v: 'campaigns', label: 'Campaigns', icon: I.camp },
       { v: 'dashboard', label: 'Dashboard', icon: I.dash },
@@ -217,7 +248,7 @@
   }
   function myOwnLeads() {
     var me = D().me.name;
-    return D().leads.filter(function (l) { return inCampaign(l, defaultCampaign()) && (isAdmin() ? true : l.assigned === me); });
+    return D().leads.filter(function (l) { return isAdmin() ? true : l.assigned === me; });
   }
   function sidebar() {
     var items = navItems();
@@ -227,7 +258,7 @@
         return '<button data-act="nav" data-v="' + it.v + '" class="' + (S.view === it.v ? 'on' : '') + '"' + (S.view === it.v ? ' aria-current="page"' : '') + '>' + it.icon + h(it.label) +
           (it.badge ? '<span class="badge">' + it.badge + '</span>' : (it.count ? '<span class="count">' + it.count + '</span>' : '')) + '</button>';
       }).join('') + '</nav>' +
-      '<div class="side-user"><span class="avatar">' + h(initials(D().me.name)) + '</span><div><strong>' + h(D().me.name) + '</strong><div style="opacity:.75">' + (isAdmin() ? 'Admin' : h(D().me.team || 'Team')) + '</div></div></div></aside>';
+      '<div class="side-user">' + av(D().me.name, 40) + '<div><strong>' + h(D().me.name) + '</strong><div style="opacity:.75">' + (isAdmin() ? 'Admin' : h(D().me.team || 'Team')) + '</div></div></div></aside>';
   }
   function bottomNav() {
     return '<nav class="bnav mob-only" aria-label="Main">' + navItems().map(function (it) {
@@ -245,46 +276,49 @@
     }
   }
 
-  function campSelect(sel, act, extraClass) {
-    var opts = [];
-    var act2 = activeCamps();
-    if (act2.length > 1) opts.push(['__active', 'All live campaigns']);
+  function campSelect(sel, act) {
+    var opts = [['__live', 'All live campaigns']];
     D().campaigns.forEach(function (c) {
       var state = c.unsorted ? '' : (c.active ? ' · Live' : (c.upcoming ? ' · Upcoming' : ' · Ended'));
       opts.push([c.name, campLabel(c.name) + state]);
     });
-    return '<select aria-label="Campaign" data-change="' + act + '" class="' + (extraClass || '') + '">' + opts.map(function (o) {
+    sel = sel == null ? '__live' : sel;
+    return '<select aria-label="Campaign" data-change="' + act + '">' + opts.map(function (o) {
       return '<option value="' + h(o[0]) + '"' + (o[0] === sel ? ' selected' : '') + '>' + h(o[1]) + '</option>';
     }).join('') + '</select>';
-  }
-  function campChipText() {
-    if (S.campaign === '__active') return 'All live campaigns';
-    var c = campByName(S.campaign);
-    if (!c) return campLabel(S.campaign);
-    if (c.unsorted) return 'Unsorted leads';
-    return c.name + (c.active ? (c.expiry ? ' · ends ' + shortDate(c.expiry) : ' · live') : (c.upcoming ? ' · starts ' + shortDate(c.start) : ' · ended'));
   }
 
   function greeting() { var hr = new Date().getHours(); return hr < 12 ? 'Good morning' : (hr < 17 ? 'Good afternoon' : 'Good evening'); }
 
   // ── Leads view ──
+  function statHero(c) {
+    var p = personOf();
+    var label = p === 'me' ? 'Your day' : (p === '' ? 'Team today' : (p === '__none' ? 'Unassigned' : p.split(' ')[0] + '’s day'));
+    return '<section class="stat-hero" id="stat-hero"><span class="lbl">' + h(label) + '</span><div class="stats">' +
+      statBtn('new', c.newl, 'New leads') + statBtn('today', c.today, 'Due today') + statBtn('over', c.over, 'Overdue', true) + '</div></section>';
+  }
   function leadsView() {
+    var src = leadsOf(S.campaign);
+    if (S.campaign != null && !src) loadPast(S.campaign);
     var all = scopedLeads(), c = counts(all), list = applyFilter(all);
     var first = D().me.name.split(' ')[0];
-    var live = S.campaign === '__active' || (campByName(S.campaign) || {}).active;
     var top = '<header class="lt"><div class="lt-row"><div style="display:flex;flex-direction:column;gap:2px;min-width:0">' +
       '<span class="eyebrow">' + h(C.SUBTITLE || '') + '</span><h1>' + greeting() + ', ' + h(first) + '</h1></div>' + pushBell() + '</div>' +
-      '<label class="camp-pick"><span class="live-dot" style="' + (live ? '' : 'background:#AEAEB2') + '"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + h(campChipText()) + '</span>' + I.down + campSelect(S.campaign, 'campaign') + '</label></header>' +
-      '<section class="stat-hero"><span class="lbl">' + (isAdmin() && !S.person ? 'Team today' : 'Your day') + '</span><div class="stats">' +
-      statBtn('new', c.newl, 'New leads') + statBtn('today', c.today, 'Due today') + statBtn('over', c.over, 'Overdue', true) +
-      '</div></section>';
-    var tools = '<div class="page" style="padding-bottom:0">' + pushBanner() +
+      '<label class="camp-pick">' + (personOf() && personOf() !== '__none' ? av(personOf() === 'me' ? D().me.name : personOf(), 22) : '<span class="live-dot"></span>') +
+      '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + h(personLabel()) + '</span>' + I.down + personSelect() + '</label></header>' +
+      statHero(c);
+    var banner = '';
+    if (S.campaign != null) {
+      banner = '<div class="past-banner"><span>' + (isLiveCamp(S.campaign) ? 'Showing only <b>' : 'Looking back at <b>') + h(campLabel(S.campaign)) + '</b></span><button data-act="backLive">' + (activeCamps().length ? 'Back to live' : 'Close') + '</button></div>';
+    }
+    var tools = '<div class="page" style="padding-bottom:0">' + pushBanner() + banner +
       '<label class="search">' + I.search + '<input type="search" data-input="q" value="' + h(S.q) + '" placeholder="Search name, phone or email" aria-label="Search leads"></label>' +
       '<div class="chips">' + chip('open', 'Open · ' + c.open) + chip('new', 'New · ' + c.newl) + chip('today', 'Due today · ' + c.today) + chip('over', 'Overdue · ' + c.over, true) +
-      (c.fresh ? chip('fresh', 'Just added · ' + c.fresh) : '') + chip('ret', 'Returning · ' + c.ret) + chip('closed', 'Closed · ' + c.closed) +
-      (isAdmin() ? personSelect() : '') + '</div></div>';
+      (c.fresh ? chip('fresh', 'Just added · ' + c.fresh) : '') + chip('ret', 'Returning · ' + c.ret) + chip('closed', 'Closed · ' + c.closed) + chip('all', 'All · ' + c.all) +
+      statusSelect() + '</div></div>';
     var body;
-    if (isDesktop()) {
+    if (S.campaign != null && !src) body = '<div class="page"><div class="loading" style="min-height:30vh"><div class="spin"></div>Loading ' + h(campLabel(S.campaign)) + '…</div></div>';
+    else if (isDesktop()) {
       var sel = S.selId ? findLead(S.selId) : null;
       body = '<div class="page"><div class="desk-split"><div class="list-col">' + (list.length ? leadTable(list) : emptyLeads()) + '</div>' +
         '<aside class="detail-col" aria-label="Selected lead">' + (sel ? detailInner(sel) : '<div class="empty"><strong>Pick a lead</strong>Its details, call buttons and follow-up reminder open here.</div>') + '</aside></div></div>';
@@ -297,19 +331,33 @@
     return '<button class="stat' + (warn ? ' warn' : '') + (S.filter === f ? ' sel' : '') + '" data-act="filter" data-v="' + f + '"><b>' + n + '</b><span>' + label + '</span></button>';
   }
   function chip(f, label, red) { return '<button class="chip' + (red ? ' red' : '') + (S.filter === f ? ' on' : '') + '" data-act="filter" data-v="' + f + '"' + (S.filter === f ? ' aria-pressed="true"' : ' aria-pressed="false"') + '>' + h(label) + '</button>'; }
+  function teamNames() {
+    var me = D().me.name, names = {}, visible = D().campaigns.map(function (c) { return c.name; });
+    D().users.forEach(function (u) {
+      if (!u.active || u.role === 'Admin' || u.name === me) return;
+      if ((u.campaigns || []).some(function (c) { return visible.indexOf(c) >= 0; })) names[u.name] = 1;
+    });
+    (leadsOf(S.campaign) || []).forEach(function (l) { if (l.assigned && l.assigned !== me) names[l.assigned] = 1; });
+    return Object.keys(names).sort();
+  }
   function personSelect() {
-    var names = {}; D().leads.forEach(function (l) { if (l.assigned && inCampaign(l)) names[l.assigned] = 1; });
-    var opts = [['', 'Whole team'], ['__none', 'Unassigned']].concat(Object.keys(names).sort().map(function (n) { return [n, n]; }));
-    return '<select class="sel-inline" aria-label="Team member" data-change="person">' + opts.map(function (o) { return '<option value="' + h(o[0]) + '"' + (S.person === o[0] ? ' selected' : '') + '>' + h(o[1]) + '</option>'; }).join('') + '</select>';
+    var opts = [['me', 'My leads'], ['', 'All team']].concat(teamNames().map(function (n) { return [n, n]; })).concat([['__none', 'Unassigned']]);
+    var cur = personOf();
+    return '<select aria-label="Whose leads" data-change="person">' + opts.map(function (o) { return '<option value="' + h(o[0]) + '"' + (cur === o[0] ? ' selected' : '') + '>' + h(o[1]) + '</option>'; }).join('') + '</select>';
+  }
+  function statusSelect() {
+    var st = (D().statuses || []).filter(function (x) { return x !== 'Duplicate'; });
+    return '<select class="sel-inline" aria-label="Filter by status" data-change="statusF"' + (S.statusF ? ' style="background-color:var(--blue);color:#fff"' : '') + '><option value="">All statuses</option>' +
+      st.map(function (x) { return '<option' + (S.statusF === x ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select>';
   }
   function emptyLeads() {
-    var msg = S.q ? 'No lead matches “' + h(S.q) + '”.' : ({ over: 'Nothing overdue. Nice work.', today: 'No follow-ups due today.', new: 'No new leads waiting.', fresh: 'No new leads since your last visit.', ret: 'No returning leads here.', closed: 'No closed leads yet.' }[S.filter] || 'No open leads in this campaign.');
+    var msg = S.q ? 'No lead matches “' + h(S.q) + '”.' : (S.statusF ? 'No leads marked ' + h(S.statusF) + ' here.' : ({ over: 'Nothing overdue. Nice work.', today: 'No follow-ups due today.', new: 'No new leads waiting.', fresh: 'No new leads since your last visit.', ret: 'No returning leads here.', closed: 'No closed leads yet.' }[S.filter] || (personOf() === 'me' ? 'No open leads assigned to you. Switch to All team to see everyone’s.' : 'No open leads here.')));
     return '<div class="empty"><strong>All clear</strong>' + msg + '</div>';
   }
   function dueLine(l) {
     var f = fuState(l);
     if (f) return '<div class="due ' + f + '">' + I.clock + '<span>' + h(fuLabel(l.followUp)) + '</span></div>';
-    return '<div class="due later">Received ' + h(shortDate(l.date)) + (l.ad ? ' · ' + h(l.ad) : '') + (isAdmin() && S.person === '' ? ' · ' + h(l.assigned || 'Unassigned') : '') + '</div>';
+    return '<div class="due later">Received ' + h(shortDate(l.date)) + (l.ad ? ' · ' + h(l.ad) : '') + '</div>';
   }
   function metaLine(l) {
     return [l.venue, l.pax, l.when].filter(Boolean).map(h).join(' · ') || h(l.ad || '');
@@ -321,36 +369,40 @@
     return '<div class="actions2"><a class="btn btn-blue" href="tel:+' + d + '">' + I.phone + 'Call</a><a class="btn btn-wa" href="https://wa.me/' + d + '" target="_blank" rel="noopener">' + I.wa + 'WhatsApp</a></div>';
   }
   function leadCard(l) {
-    return '<article class="card"><button class="lead-card" style="background:none;padding:0;display:flex;flex-direction:column;gap:8px" data-act="open" data-id="' + h(l.id) + '">' +
+    return '<article class="card' + tint(l) + '" id="lc-' + h(l.id) + '"><button class="lead-card" style="background:none;padding:0;display:flex;flex-direction:column;gap:8px" data-act="open" data-id="' + h(l.id) + '">' +
       '<div class="lc-top" style="width:100%"><div style="display:flex;flex-direction:column;gap:4px;min-width:0">' +
       '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="lc-name">' + h(l.name) + '</span>' +
       (isNewSince(l) ? '<span class="tag new">NEW</span>' : '') + (l.returning ? '<span class="tag ret">RETURNING</span>' : '') + '</div>' +
       '<span class="lc-meta">' + metaLine(l) + '</span></div><span class="pill ' + statusClass(l.status) + '">' + h(l.status) + '</span></div>' +
-      dueLine(l) + '</button>' + contactLinks(l) + '</article>';
+      '<div class="row-between" style="width:100%">' + dueLine(l) + av(l.assigned) + '</div></button>' + contactLinks(l) + '</article>';
+  }
+  function leadRow(l) {
+    var f = fuState(l);
+    return '<tr id="lr-' + h(l.id) + '" class="row' + tint(l) + (S.selId === l.id ? ' sel' : '') + '" data-act="open" data-id="' + h(l.id) + '" tabindex="0">' +
+      '<td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><strong style="color:var(--blue)">' + h(l.name) + '</strong>' + (isNewSince(l) ? '<span class="tag new">NEW</span>' : '') + (l.returning ? '<span class="tag ret">RETURNING</span>' : '') + '</div><div class="hint" style="margin-top:2px;white-space:nowrap">' + h(['Received ' + shortDate(l.date), l.venue, l.pax].filter(Boolean).join(' · ')) + '</div></td>' +
+      '<td class="c-guests" style="white-space:nowrap">' + h(l.pax || '—') + '</td>' +
+      '<td><span class="pill ' + statusClass(l.status) + '">' + h(l.status) + '</span></td>' +
+      '<td><span class="who">' + av(l.assigned, 28) + '<span>' + h(l.assigned ? l.assigned.split(' ')[0] : 'Unassigned') + '</span></span></td>' +
+      '<td style="font-weight:600;min-width:110px;color:' + (f === 'over' ? 'var(--red)' : (f ? 'var(--blue)' : 'var(--muted)')) + '">' + (f ? h(fuLabel(l.followUp)) : '—') + '</td>' +
+      '<td class="c-contact" style="text-align:right;white-space:nowrap">' + contactLinks(l, true) + '</td></tr>';
   }
   function leadTable(list) {
-    var showWho = isAdmin();
-    return '<div class="lead-table-wrap"><table class="lead-table"><thead><tr><th>Name</th><th>Guests</th><th>Status</th>' + (showWho ? '<th>Assigned</th>' : '') + '<th>Follow-up</th><th class="c-contact" style="text-align:right">Contact</th></tr></thead><tbody>' +
-      list.slice(0, 400).map(function (l) {
-        var f = fuState(l);
-        return '<tr class="row' + (S.selId === l.id ? ' sel' : '') + '" data-act="open" data-id="' + h(l.id) + '" tabindex="0">' +
-          '<td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><strong style="color:var(--blue)">' + h(l.name) + '</strong>' + (isNewSince(l) ? '<span class="tag new">NEW</span>' : '') + (l.returning ? '<span class="tag ret">RETURNING</span>' : '') + '</div><div class="hint" style="margin-top:2px;white-space:nowrap">' + h(['Received ' + shortDate(l.date), l.venue, l.ad].filter(Boolean).join(' · ')) + '</div></td>' +
-          '<td style="white-space:nowrap">' + h(l.pax || '—') + '</td>' +
-          '<td><span class="pill ' + statusClass(l.status) + '">' + h(l.status) + '</span></td>' +
-          (showWho ? '<td>' + h(l.assigned || '—') + '</td>' : '') +
-          '<td style="font-weight:600;min-width:110px;color:' + (f === 'over' ? 'var(--red)' : (f ? 'var(--blue)' : 'var(--muted)')) + '">' + (f ? h(fuLabel(l.followUp)) : '—') + '</td>' +
-          '<td class="c-contact" style="text-align:right;white-space:nowrap">' + contactLinks(l, true) + '</td></tr>';
-      }).join('') + '</tbody></table>' + (list.length > 400 ? '<p class="hint" style="padding:12px">Showing 400 of ' + list.length + '. Search to narrow down.</p>' : '') + '</div>';
+    return '<div class="lead-table-wrap"><table class="lead-table"><thead><tr><th>Name</th><th class="c-guests">Guests</th><th>Status</th><th>Assigned to</th><th>Follow-up</th><th class="c-contact" style="text-align:right">Contact</th></tr></thead><tbody>' +
+      list.slice(0, 400).map(leadRow).join('') + '</tbody></table>' + (list.length > 400 ? '<p class="hint" style="padding:12px">Showing 400 of ' + list.length + '. Search to narrow down.</p>' : '') + '</div>';
   }
 
-  // ── Lead detail ──
+  // ── Lead detail ── (every change saves itself; comments are added with their own button)
   function openLead(id) {
     var l = findLead(id); if (!l) return;
     S.selId = id;
-    S.edit = { id: id, status: l.status, followUp: toLocalInput(l.followUp), comment: '', assigned: l.assigned };
-    if (!isDesktop()) S.sheet = { type: 'lead', id: id };
-    render();
-    if (!isDesktop()) { var b = document.querySelector('.sheet-body'); if (b) b.scrollTop = 0; }
+    if (!S.edit || S.edit.id !== id) S.edit = { id: id, comment: '' };
+    if (!isDesktop()) { S.sheet = { type: 'lead', id: id, fresh: true }; render(); var b = document.querySelector('.sheet-body'); if (b) b.scrollTop = 0; return; }
+    // desktop: swap the side panel and the row highlight only
+    var col = document.querySelector('.detail-col');
+    if (!col) { S.view = 'leads'; return render(); }
+    col.innerHTML = detailInner(l); col.scrollTop = 0;
+    Array.prototype.forEach.call(document.querySelectorAll('.lead-table tr.sel'), function (r) { r.classList.remove('sel'); });
+    var row = document.getElementById('lr-' + id); if (row) row.classList.add('sel');
   }
   function returningText(r) {
     if (!r) return '';
@@ -369,35 +421,48 @@
     rows.push('<div><b>' + h(shortDate(l.date)) + '</b><span>Lead received' + (l.ad ? ' from ' + h(l.ad) : '') + (l.campaign ? ' · ' + h(l.campaign) : '') + '.</span></div>');
     return rows.join('');
   }
+  function headHtml(l) {
+    return '<div class="row-between" style="align-items:flex-start"><h2 class="d-name">' + h(l.name) + '</h2><span class="pill ' + statusClass(l.status) + '">' + h(l.status) + '</span></div>' +
+      '<span class="hint" style="font-size:13px">Received ' + h(longDate(l.date)) + (l.ad ? ' · ' + h(l.ad) : '') + '</span>';
+  }
+  function fuHtml(l) {
+    var v = toLocalInput(l.followUp);
+    return '<div class="row-between" style="margin-top:4px"><label class="lbl" for="ed-fu">Follow-up reminder</label>' + (v ? '<button class="linkish" data-act="preset" data-v="clear" style="color:var(--red);font-size:13px">Clear</button>' : '') + '</div>' +
+      '<div class="preset-row">' + preset('tomorrow', 'Tomorrow 10 AM') + preset('2d', 'In 2 days') + preset('week', 'Next week') + '</div>' +
+      '<input id="ed-fu" type="datetime-local" class="inp" data-edit="followUp" value="' + h(v) + '">' +
+      '<span class="hint">' + (v ? 'Reminder set – you’ll get a notification at this time.' : 'You’ll get a notification at this time.') + '</span>';
+  }
+  function peopleFor(l) {
+    var people = D().users.filter(function (u) { return u.active && (u.role === 'Admin' || !u.campaigns || u.campaigns.indexOf('ALL') >= 0 || u.campaigns.indexOf(l.campaign) >= 0); }).map(function (u) { return u.name; });
+    if (l.assigned && people.indexOf(l.assigned) < 0) people.unshift(l.assigned);
+    return people;
+  }
   function detailInner(l) {
-    var e = S.edit && S.edit.id === l.id ? S.edit : { status: l.status, followUp: toLocalInput(l.followUp), comment: '', assigned: l.assigned };
     var d = digits(l.mobile), statuses = (D().statuses || []).slice();
     if (statuses.indexOf(l.status) < 0) statuses.unshift(l.status);
-    var people = D().users.filter(function (u) { return u.active && (u.role === 'Admin' || !u.campaigns || u.campaigns.indexOf(l.campaign) >= 0); }).map(function (u) { return u.name; });
-    if (l.assigned && people.indexOf(l.assigned) < 0) people.unshift(l.assigned);
-    return '<section style="display:flex;flex-direction:column;gap:6px">' +
-      '<div class="row-between" style="align-items:flex-start"><h2 class="d-name">' + h(l.name) + '</h2><span class="pill ' + statusClass(l.status) + '">' + h(l.status) + '</span></div>' +
-      '<span class="hint" style="font-size:13px">Received ' + h(longDate(l.date)) + (l.ad ? ' · ' + h(l.ad) : '') + (l.assigned ? ' · ' + h(l.assigned) : ' · Unassigned') + '</span></section>' +
+    var draft = S.edit && S.edit.id === l.id ? S.edit.comment : '';
+    return '<div id="detail-box" data-id="' + h(l.id) + '" style="display:contents">' +
+      '<section id="d-head" style="display:flex;flex-direction:column;gap:6px">' + headHtml(l) + '</section>' +
       (l.returning ? '<div class="ret-banner">' + I.ret + '<div><strong>Returning lead.</strong> ' + returningText(l.returning) + '</div></div>' : '') +
       '<div class="qa">' +
       (d ? '<a class="btn btn-blue" href="tel:+' + d + '">' + I.phone + 'Call</a><a class="btn btn-wa" href="https://wa.me/' + d + '" target="_blank" rel="noopener">' + I.wa + 'WhatsApp</a>' : '<span class="btn btn-line" style="grid-column:span 2">No phone number</span>') +
       (validEmail(l.email) ? '<a class="btn btn-line" href="mailto:' + h(l.email.trim()) + '">' + I.mail + 'Email</a>' : '<span class="btn btn-line" aria-disabled="true" style="opacity:.5">' + I.mail + 'Email</span>') +
       '</div>' +
       '<div class="grid2">' +
-      kv('Guests', l.pax || '—') + kv('Event date', l.when || '—') + kv('Venue', l.venue || '—') + kv('Campaign', l.campaign || 'Unsorted') +
-      kv('Mobile', d ? prettyPhone(l.mobile) : (l.mobile || '—')) + kv('Email', l.email || '—') + '</div>' +
+      kv('Guests', l.pax || '—') + kv('Event date', l.when || '—') + kv('Venue', l.venue || '—') +
+      kv('Mobile', d ? prettyPhone(l.mobile) : (l.mobile || '—'), 'sec') + kv('Email', l.email || '—', 'full') + '</div>' +
       '<div class="box"><label class="lbl" for="ed-status">Status</label><select id="ed-status" class="inp" data-edit="status">' +
-      statuses.map(function (s) { return '<option' + (s === e.status ? ' selected' : '') + '>' + h(s) + '</option>'; }).join('') + '</select>' +
-      (isAdmin() ? '<label class="lbl" for="ed-assigned" style="margin-top:4px">Assigned to</label><select id="ed-assigned" class="inp" data-edit="assigned"><option value="">Unassigned</option>' + people.map(function (n) { return '<option' + (n === e.assigned ? ' selected' : '') + '>' + h(n) + '</option>'; }).join('') + '</select>' : '') +
-      '<div class="row-between" style="margin-top:4px"><label class="lbl" for="ed-fu">Follow-up reminder</label>' + (e.followUp ? '<button class="linkish" data-act="preset" data-v="clear" style="color:var(--red);font-size:13px">Clear</button>' : '') + '</div>' +
-      '<div class="preset-row">' + preset('tomorrow', 'Tomorrow 10 AM') + preset('2d', 'In 2 days') + preset('week', 'Next week') + '</div>' +
-      '<input id="ed-fu" type="datetime-local" class="inp" data-edit="followUp" value="' + h(e.followUp) + '">' +
-      '<span class="hint">You’ll get a notification at this time.</span></div>' +
-      '<div class="box"><label class="lbl" for="ed-comment">Add comment</label><textarea id="ed-comment" class="inp" rows="3" data-edit="comment" placeholder="What happened on this call?">' + h(e.comment) + '</textarea>' +
-      '<div class="lbl" style="color:var(--muted2);margin-top:4px">History</div><div class="hist">' + histHtml(l) + '</div></div>' +
-      (isDesktop() ? '<button class="btn btn-blue btn-big" data-act="save"' + (S.saving ? ' disabled' : '') + '>' + (S.saving ? 'Saving…' : 'Save update') + '</button>' : '');
+      statuses.map(function (s) { return '<option' + (s === l.status ? ' selected' : '') + '>' + h(s) + '</option>'; }).join('') + '</select>' +
+      '<label class="lbl" for="ed-assigned" style="margin-top:4px">Assigned to</label><div style="display:flex;gap:10px;align-items:center"><span id="d-av">' + av(l.assigned, 40) + '</span><select id="ed-assigned" class="inp" data-edit="assigned"><option value="">Unassigned</option>' +
+      peopleFor(l).map(function (n) { return '<option' + (n === l.assigned ? ' selected' : '') + '>' + h(n) + '</option>'; }).join('') + '</select></div>' +
+      '<div id="d-fu" style="display:flex;flex-direction:column;gap:10px">' + fuHtml(l) + '</div>' +
+      '<span class="hint" style="color:var(--muted2)">Changes save to the sheet straight away.</span></div>' +
+      '<div class="box"><label class="lbl" for="ed-comment">Add comment</label><textarea id="ed-comment" class="inp" rows="3" data-edit="comment" placeholder="What happened on this call?">' + h(draft) + '</textarea>' +
+      '<div class="add-row"><button class="btn btn-blue" data-act="addComment">Add to history</button></div>' +
+      '<div class="lbl" style="color:var(--muted2);margin-top:4px">History</div><div class="hist" id="d-hist">' + histHtml(l) + '</div></div>' +
+      '</div>';
   }
-  function kv(k, v) { return '<div class="kv"><span>' + h(k) + '</span><b>' + h(v) + '</b></div>'; }
+  function kv(k, v, cls) { return '<div class="kv' + (cls ? ' ' + cls : '') + '"><span>' + h(k) + '</span><b>' + h(v) + '</b></div>'; }
   function preset(v, label) { return '<button class="chip" data-act="preset" data-v="' + v + '">' + label + '</button>'; }
 
   // ── Reminders ──
@@ -414,10 +479,7 @@
   }
 
   // ── Campaigns ──
-  function campStats(name) {
-    var rows = D().teamRows.filter(function (r) { return r.c === name; });
-    return { total: rows.length, won: rows.filter(function (r) { return r.s === 'Confirmed'; }).length };
-  }
+  function campStats(name) { var c = campByName(name); return (c && c.stats) || { total: 0, won: 0, open: 0 }; }
   function membersOf(name) {
     return D().users.filter(function (u) { return u.active && u.role !== 'Admin' && u.campaigns && u.campaigns.indexOf(name) >= 0; }).map(function (u) { return u.name; });
   }
@@ -461,7 +523,7 @@
   function campForm(name) {
     var c = name ? campByName(name) : null;
     var members = c ? membersOf(c.name) : [];
-    S.sheet = { type: 'camp', original: c ? c.name : '', name: c ? c.name : '', team: c ? c.team : 'Events', start: c ? c.start : todayKey(), expiry: c ? c.expiry : '', brief: c ? c.brief : '', members: members, notify: !c };
+    S.sheet = { type: 'camp', fresh: true, original: c ? c.name : '', name: c ? c.name : '', team: c ? c.team : 'Events', start: c ? c.start : todayKey(), expiry: c ? c.expiry : '', brief: c ? c.brief : '', members: members, notify: !c };
     if (!c) S.sheet.members = teamMembers('Events');
     render();
   }
@@ -493,7 +555,7 @@
     });
     var people = D().users.filter(function (u) { return u.role !== 'Admin'; });
     var cards = people.map(function (u) {
-      return '<article class="box" style="gap:10px' + (u.active ? '' : ';opacity:.6') + '"><div style="display:flex;align-items:center;gap:10px"><span class="avatar">' + h(initials(u.name)) + '</span>' +
+      return '<article class="box" style="gap:10px' + (u.active ? '' : ';opacity:.6') + '"><div style="display:flex;align-items:center;gap:10px">' + av(u.name, 40) +
         '<div style="flex:1;min-width:0"><strong style="color:var(--blue);font-size:15px">' + h(u.name) + '</strong><div class="hint">' + h(u.team || 'No team') + ' · ' + plural((u.campaigns || []).length, 'campaign') + (u.hasPin ? '' : ' · passcode not set') + (u.active ? '' : ' · switched off') + '</div></div>' +
         '<button class="linkish" style="font-size:12px" data-act="resetPin" data-v="' + h(u.name) + '">Reset passcode</button></div>' +
         '<div class="preset-row">' + camps.map(function (c) {
@@ -502,7 +564,8 @@
         }).join('') + '</div>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end"><label class="hint">Team<select class="inp" style="height:40px;margin-top:4px" data-userfield="team" data-user="' + h(u.name) + '">' + ['', 'Events', 'Sales'].concat(u.team && ['Events', 'Sales'].indexOf(u.team) < 0 ? [u.team] : []).map(function (t) { return '<option value="' + h(t) + '"' + (t === (u.team || '') ? ' selected' : '') + '>' + (t || '—') + '</option>'; }).join('') + '</select></label>' +
         '<label class="hint">Email for 10 AM summary<input class="inp" style="height:40px;margin-top:4px" type="email" value="' + h(u.email || '') + '" placeholder="name@hilton.com" data-userfield="email" data-user="' + h(u.name) + '"></label>' +
-        '<button class="btn btn-line" style="height:40px;padding:0 12px;font-size:13px" data-act="toggleActive" data-v="' + h(u.name) + '">' + (u.active ? 'Switch off' : 'Switch on') + '</button></div></article>';
+        '<button class="btn btn-line" style="height:40px;padding:0 12px;font-size:13px" data-act="toggleActive" data-v="' + h(u.name) + '">' + (u.active ? 'Switch off' : 'Switch on') + '</button></div>' +
+        '<label class="hint">Photo link (Google Drive “Anyone with the link” or any image URL)<input class="inp" style="height:40px;margin-top:4px" type="url" value="' + h(u.photo || '') + '" placeholder="https://drive.google.com/file/d/…" data-userfield="photo" data-user="' + h(u.name) + '"></label></article>';
     }).join('');
     return '<header class="page-head"><div><h1>Team &amp; access</h1><p>Tick a campaign to let that person see its leads and get its notifications</p></div><button class="icon-btn mob-only" data-act="nav" data-v="campaigns" aria-label="Back to campaigns">' + I.back + '</button></header>' +
       '<div class="page">' + (isDesktop() ? '<div class="cards-2">' + cards + '</div>' : cards) +
@@ -515,11 +578,12 @@
   function dashboardView() {
     var admin = isAdmin();
     var scope = S.dashScope || (admin ? 'team' : 'mine');
-    var camp = S.dashCamp == null ? S.campaign : S.dashCamp;
+    var camp = S.dashCamp === undefined ? S.campaign : S.dashCamp;
     var me = D().me.name;
-    var rows = D().teamRows.filter(function (r) {
-      var inC = camp === '__active' ? activeCamps().some(function (c) { return c.name === r.c; }) : r.c === camp;
-      return inC && (scope === 'team' || r.a === me);
+    var src = leadsOf(camp);
+    if (camp != null && !src) loadPast(camp);
+    var rows = (src || []).filter(function (l) { return scope === 'team' || l.assigned === me; }).map(function (l) {
+      return { c: l.campaign, s: l.status, a: l.assigned, ad: l.ad, p: l.pax, w: l.when, d: l.date, v: l.venue, r: l.returning ? 1 : 0 };
     });
     var closed = closedList(), n = rows.length;
     function cnt(fn) { return rows.filter(fn).length; }
@@ -549,7 +613,7 @@
     var vColors = ['#002F61', '#06937E', '#686B8C', '#007293'];
     // per day
     var byDay = {}; rows.forEach(function (r) { if (r.d) byDay[r.d] = (byDay[r.d] || 0) + 1; });
-    var dayKeys = Object.keys(byDay).sort().slice(-21);
+    var dayKeys = Object.keys(byDay).sort().slice(isDesktop() ? -21 : -5);   // phones: last 5 days
     var maxD = Math.max.apply(null, dayKeys.map(function (d) { return byDay[d]; }).concat([1]));
     var avg = dayKeys.length ? Math.round(dayKeys.reduce(function (a, d) { return a + byDay[d]; }, 0) / dayKeys.length) : 0;
     // team table
@@ -563,6 +627,7 @@
       '<label class="camp-pick"><span class="live-dot"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + h(campLabel(camp)) + '</span>' + I.down + campSelect(camp, 'dashCamp') + '</label>' +
       (admin ? '' : '<div class="seg" role="tablist" style="margin-top:6px"><button role="tab" aria-selected="' + (scope === 'mine') + '" class="' + (scope === 'mine' ? 'on' : '') + '" data-act="dashScope" data-v="mine">My leads</button><button role="tab" aria-selected="' + (scope === 'team') + '" class="' + (scope === 'team' ? 'on' : '') + '" data-act="dashScope" data-v="team">Team</button></div>') +
       '</header>';
+    if (camp != null && !src) return head + '<div class="page"><div class="loading" style="min-height:30vh"><div class="spin"></div>Loading…</div></div>';
     if (!n) return head + '<div class="page"><div class="empty"><strong>No leads yet</strong>Numbers appear here as soon as leads arrive in this campaign.</div></div>';
     return head + '<div class="page">' +
       '<div class="kpis">' +
@@ -590,7 +655,7 @@
     var me = D().me, standalone = isStandalone();
     var perm = ('Notification' in window) ? Notification.permission : 'unsupported';
     var pushOn = !!pushAppId();
-    return '<header class="page-head"><div><h1>Profile</h1><p>' + h(me.name) + ' · ' + (isAdmin() ? 'Admin' : h(me.team || 'Team member')) + '</p></div><span class="avatar" style="width:48px;height:48px;font-size:15px">' + h(initials(me.name)) + '</span></header>' +
+    return '<header class="page-head"><div><h1>Profile</h1><p>' + h(me.name) + ' · ' + (isAdmin() ? 'Admin' : h(me.team || 'Team member')) + '</p></div>' + av(me.name, 48) + '</header>' +
       '<div class="page" style="max-width:640px">' +
       '<section class="box"><div class="lbl">Notifications</div>' +
       (!pushOn ? '<p class="hint" style="margin:0">Push notifications aren’t switched on for this app yet (admin: add the OneSignal App ID).</p>' :
@@ -613,7 +678,7 @@
     var s = S.sheet, title = '', body = '', act = '', label = 'Save';
     if (s.type === 'lead') {
       var l = findLead(s.id); if (!l) { S.sheet = null; return ''; }
-      title = 'Lead'; body = detailInner(l); act = 'save';
+      title = 'Lead'; body = detailInner(l);
     } else if (s.type === 'camp') {
       title = s.original ? 'Edit Campaign' : 'New Campaign'; body = campFormHtml(); act = 'saveCamp'; label = s.original ? 'Save' : 'Create';
     } else if (s.type === 'pin') {
@@ -621,9 +686,9 @@
     }
     var wrapStyle = isDesktop() ? ' style="inset:auto;top:0;right:0;bottom:0;width:440px;z-index:70;box-shadow:-10px 0 40px rgba(0,17,55,.18)"' : '';
     return (isDesktop() ? '<div class="overlay" style="z-index:65" data-act="closeSheet"></div>' : '') +
-      '<div class="sheet-wrap" role="dialog" aria-modal="true" aria-label="' + h(title) + '"' + wrapStyle + '><div class="sheet-head">' +
-      '<button class="nav-txt" data-act="closeSheet">' + (s.type === 'lead' ? 'Close' : 'Cancel') + '</button><span class="title">' + h(title) + '</span>' +
-      '<button class="nav-txt strong" data-act="' + act + '"' + (S.saving ? ' disabled' : '') + '>' + (S.saving ? 'Saving…' : label) + '</button></div>' +
+      '<div class="sheet-wrap' + (s.fresh ? ' anim' : '') + '" role="dialog" aria-modal="true" aria-label="' + h(title) + '"' + wrapStyle + '><div class="sheet-head">' +
+      '<button class="nav-txt" data-act="closeSheet">' + (s.type === 'lead' ? 'Done' : 'Cancel') + '</button><span class="title">' + h(title) + '</span>' +
+      (act ? '<button class="nav-txt strong" data-act="' + act + '"' + (S.saving ? ' disabled' : '') + '>' + (S.saving ? 'Saving…' : label) + '</button>' : '<span></span>') + '</div>' +
       '<div class="sheet-body">' + body + '</div></div>';
   }
 
@@ -645,7 +710,7 @@
       (DEMO ? '<div class="demo-flag">Demo mode – any passcode works</div>' : '') +
       '<header class="hero"><div class="logo-tile"><img src="icons/logo.png" alt="Embassy Suites by Hilton"></div><h1>Leads</h1><p>' + h(C.SUBTITLE || '') + '</p></header>' +
       '<section class="auth-card">' +
-      (names == null ? '<div class="loading" style="min-height:120px"><div class="spin"></div>Loading team…</div>' :
+      (names == null || (!names.length && !L.msg) ? '<div class="loading" style="min-height:120px"><div class="spin"></div>Loading team…</div>' :
         '<h2>' + h(title) + '</h2><p class="auth-quote">“' + h(QUOTES[S.quoteIdx]) + '”</p>' +
         '<div><label class="lbl" for="who" style="display:block;margin-bottom:6px">Your name</label><select id="who" class="select-ios" data-change="loginName">' +
         '<option value="">Choose your name</option>' +
@@ -672,14 +737,23 @@
     var msg = document.getElementById('pin-msg'); if (msg) { msg.textContent = L.msg; msg.className = 'pin-msg ' + (L.err ? 'err' : 'ok'); }
     if (inp) inp.value = L.pin;
   }
+  // the team list is kept on the phone, so the sign-in screen shows instantly; it refreshes quietly behind
+  function applyNames(list) {
+    var L = S.login; L.names = list;
+    var me = list.filter(function (n) { return n.name === L.name; })[0];
+    if (!me) L.name = '';
+    else if (!L.first && !L.pin) L.stage = me.hasPin ? 'enter' : 'create';
+  }
   function loadNames() {
+    var cached = ls('names');
+    if (cached && cached.length && !S.login.names) { applyNames(cached); renderLogin(); }
     api('names').then(function (r) {
-      S.login.names = r.names;
-      var me = r.names.filter(function (n) { return n.name === S.login.name; })[0];
-      if (!me) S.login.name = '';
-      else S.login.stage = me.hasPin ? 'enter' : 'create';
-      renderLogin();
-    }).catch(function (e) { S.login.names = []; S.login.msg = e.message; S.login.err = true; renderLogin(); toast(e.message, true); });
+      ls('names', r.names);
+      var L = S.login, typing = L.pin || L.busy || L.first || (document.activeElement && document.activeElement.id === 'pin');
+      var changed = JSON.stringify(r.names) !== JSON.stringify(L.names);
+      if (typing) { L.names = r.names; return; }
+      applyNames(r.names); if (changed && !S.token) renderLogin();
+    }).catch(function (e) { if (S.login.names && S.login.names.length) return; S.login.names = []; S.login.msg = e.message; S.login.err = true; renderLogin(); toast(e.message, true); });
   }
   function pinInput(val) {
     var L = S.login; if (L.busy) return;
@@ -687,7 +761,7 @@
     if (L.pin.length < 4) return;
     var pin = L.pin;
     if (L.stage === 'create') { L.first = pin; L.pin = ''; L.stage = 'confirm'; setTimeout(function () { paintPin(); }, 150); return; }
-    L.busy = true;
+    L.busy = true; L.msg = 'Signing in…'; L.err = false; paintPin();
     var call = L.stage === 'confirm'
       ? (pin === L.first ? api('setPin', { name: L.name, pin: pin }) : Promise.reject(new Error('Passcodes didn’t match. Try again.')))
       : api('login', { name: L.name, pin: pin });
@@ -697,7 +771,7 @@
       S.token = r.token; ls('token', r.token); ls('lastName', L.name);
       L.pin = ''; L.msg = 'Welcome, ' + L.name.split(' ')[0]; L.err = false; paintPin();
       var inp = document.getElementById('pin'); if (inp) inp.blur();
-      loadData();
+      if (r.data) gotData(r.data, false, 0); else loadData();   // sign-in already carries the leads
     }).catch(function (e) {
       L.busy = false; L.pin = ''; L.err = true; L.msg = e.message;
       if (L.stage === 'confirm') { L.stage = 'create'; L.first = ''; }
@@ -709,32 +783,38 @@
   // ───────── data loading ─────────
   function loadData(silent) {
     if (!silent && !D()) APP.innerHTML = '<div class="loading"><div class="spin"></div>Loading your leads…</div>';
-    return api('data').then(function (r) {
-      var first = !D();
-      S.data = r;
-      ls('cache', { at: Date.now(), data: r });
-      if (S.campaign == null || (S.campaign !== '__active' && !campByName(S.campaign))) S.campaign = defaultCampaign();
-      if (!silent || first) render(); else softRender();
-      if (first) { afterHoursCheck(); initPush(); handleHash(); }
-    }).catch(function (e) {
+    var askedAt = Date.now();
+    return api('data').then(function (r) { gotData(r, silent, askedAt); }).catch(function (e) {
       if (!S.token) return;
       if (!D()) APP.innerHTML = '<div class="loading" style="flex-direction:column;text-align:center;padding:24px"><strong style="color:var(--blue)">Couldn’t load your leads</strong><span>' + h(e.message) + '</span><button class="btn btn-blue" style="padding:0 18px;margin-top:10px" data-act="retry">Try again</button></div>';
-      else toast(e.message, true);
+      else if (!silent) toast(e.message, true);
     });
   }
-  // keep scroll + typing focus when refreshing in the background
+  function gotData(r, silent, askedAt) {
+    var first = !D();
+    delete r.ok;
+    // keep anything changed on this phone after the request went out
+    if (D() && askedAt) r.leads = r.leads.map(function (l) { return (S.touched[l.id] || 0) > askedAt ? (findLead(l.id) || l) : l; });
+    S.data = r;
+    cacheData();
+    if (S.campaign != null && !campByName(S.campaign)) S.campaign = null;
+    if (!silent || first) render(); else softRender();
+    if (first) { afterHoursCheck(); initPush(); handleHash(); }
+  }
+  function cacheData() { try { ls('cache', { at: Date.now(), data: D() }); } catch (e) {} }
+  // background refresh: never re-render under someone's finger
   function softRender() {
-    var active = document.activeElement, id = active && active.id, sel = active && active.selectionStart;
-    var y = window.scrollY, sb = document.querySelector('.sheet-body'), sy = sb ? sb.scrollTop : 0;
-    if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT') && active.type !== 'search') return; // don't interrupt typing
-    render();
-    window.scrollTo(0, y); var sb2 = document.querySelector('.sheet-body'); if (sb2) sb2.scrollTop = sy;
+    var active = document.activeElement;
+    var typing = active && (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && active.type !== 'search') || active.tagName === 'SELECT');
+    if ((S.sheet && !isDesktop()) || typing || S.pending) { S.dirty = true; return; }
+    var id = active && active.id, sel = active && active.selectionStart;
+    rerenderKeepScroll();
     if (id) { var el = document.getElementById(id); if (el) { el.focus(); try { el.setSelectionRange(sel, sel); } catch (e) {} } }
   }
   function signOut(silent) {
     if (S.token && !silent) api('logout').catch(function () {});
     S.token = null; S.data = null; ls('token', null); ls('cache', null);
-    S.sheet = null; S.selId = null; S.view = 'leads'; S.campaign = null;
+    S.sheet = null; S.selId = null; S.view = 'leads'; S.campaign = null; S.person = null; S.statusF = ''; S.past = {};
     S.login.pin = ''; S.login.msg = ''; S.login.names = null;
     renderLogin(); loadNames();
     try { if (window.OneSignal && window.OneSignal.logout) window.OneSignal.logout(); } catch (e) {}
@@ -745,27 +825,44 @@
   }
 
   // ───────── saving ─────────
-  function saveLead() {
-    var e = S.edit, l = findLead(e.id); if (!l || S.saving) return;
-    var body = { id: l.id }, changed = false;
-    if (e.status !== l.status) { body.status = e.status; changed = true; }
-    var oldFu = toLocalInput(l.followUp);
-    if (e.followUp !== oldFu) { body.followUp = e.followUp ? new Date(e.followUp).toISOString() : ''; changed = true; }
-    if (e.comment && e.comment.trim()) { body.comment = e.comment.trim(); changed = true; }
-    if (isAdmin() && e.assigned !== l.assigned) { body.assigned = e.assigned; changed = true; }
-    if (!changed) return toast('Nothing to save yet');
-    S.saving = true; render();
-    api('update', body).then(function (r) {
-      S.saving = false;
-      var idx = D().leads.indexOf(l);
-      if (r.lead) { r.lead.returning = r.lead.returning || l.returning; D().leads[idx] = r.lead; }
-      S.edit = { id: l.id, status: r.lead.status, followUp: toLocalInput(r.lead.followUp), comment: '', assigned: r.lead.assigned };
-      D().teamRows.forEach(function (t) { if (t._id === l.id) t.s = r.lead.status; });
-      ls('cache', { at: Date.now(), data: D() });
-      if (!isAdmin() && r.lead.assigned !== D().me.name) { D().leads.splice(idx, 1); S.sheet = null; S.selId = null; }
-      toast('Saved to the sheet'); render();
-      loadData(true);
-    }).catch(function (err) { S.saving = false; render(); toast(err.message, true); });
+  // Save one change straight away. The screen updates first; the sheet follows a moment later.
+  function saveLead(id, patch, okMsg) {
+    var l = findLead(id); if (!l) return;
+    var before = JSON.parse(JSON.stringify(l)), me = D().me.name;
+    if (patch.status !== undefined) l.status = patch.status;
+    if (patch.followUp !== undefined) l.followUp = patch.followUp;
+    if (patch.assigned !== undefined) l.assigned = patch.assigned;
+    if (patch.comment) { var d = new Date(); l.comments = (l.comments ? l.comments + ' || ' : '') + pad(d.getDate()) + '-' + MON[d.getMonth()] + ' (' + me + '): ' + patch.comment; }
+    var v = l._v = (l._v || 0) + 1;
+    S.touched[id] = Date.now(); S.pending = (S.pending || 0) + 1;
+    patchLead(l);
+    var body = { id: id }; Object.keys(patch).forEach(function (k) { body[k] = patch[k]; });
+    S.saveQ = (S.saveQ || Promise.resolve()).then(function () {
+      return api('update', body).then(function (r) {
+        if (r.lead && l._v === v) { var ret = l.returning; Object.keys(r.lead).forEach(function (k) { l[k] = r.lead[k]; }); l.returning = r.lead.returning || ret; patchLead(l); }
+        S.touched[id] = Date.now(); cacheData(); toast(okMsg || 'Saved');
+      }).catch(function (e) {
+        Object.keys(before).forEach(function (k) { l[k] = before[k]; }); patchLead(l, true); toast(e.message, true);
+      }).then(function () { S.pending--; });
+    });
+  }
+  // update just the parts of the screen that show this lead (no page refresh)
+  function patchLead(l, full) {
+    var box = document.getElementById('detail-box');
+    if (box && box.dataset.id === l.id) {
+      if (full) { box.outerHTML = detailInner(l); }
+      else {
+        var hd = document.getElementById('d-head'); if (hd) hd.innerHTML = headHtml(l);
+        var hi = document.getElementById('d-hist'); if (hi) hi.innerHTML = histHtml(l);
+        var fu = document.getElementById('d-fu'); if (fu && document.activeElement !== document.getElementById('ed-fu')) fu.innerHTML = fuHtml(l);
+        var a = document.getElementById('d-av'); if (a) a.innerHTML = av(l.assigned, 40);
+        var st = document.getElementById('ed-status'); if (st && st.value !== l.status) st.value = l.status;
+        var as = document.getElementById('ed-assigned'); if (as && as.value !== (l.assigned || '')) as.value = l.assigned || '';
+      }
+    }
+    var card = document.getElementById('lc-' + l.id); if (card) card.outerHTML = leadCard(l);
+    var row = document.getElementById('lr-' + l.id); if (row) row.outerHTML = leadRow(l);
+    var hero = document.getElementById('stat-hero'); if (hero) hero.outerHTML = statHero(counts(scopedLeads()));
   }
   function saveCampaign() {
     var f = S.sheet;
@@ -774,7 +871,7 @@
     S.saving = true; render();
     api('campaignSave', { name: f.name.trim(), original: f.original, team: f.team, start: f.start, expiry: f.expiry, brief: f.brief, members: f.members, notify: f.notify })
       .then(function () { S.saving = false; S.sheet = null; toast(f.original ? 'Campaign updated' : 'Campaign created' + (f.notify ? ' – team notified' : '')); return loadData(true); })
-      .then(render)
+      .then(function () { render(); })
       .catch(function (e) { S.saving = false; render(); toast(e.message, true); });
   }
 
@@ -885,23 +982,29 @@
   // ───────── events ─────────
   var ACT = {
     nav: function (el) { S.view = el.dataset.v; S.sheet = null; window.scrollTo(0, 0); render(); },
-    filter: function (el) { S.filter = S.filter === el.dataset.v && el.dataset.v !== 'open' ? 'open' : el.dataset.v; render(); },
-    open: function (el) { openLead(el.dataset.id); },
-    closeSheet: function () { S.sheet = null; if (!isDesktop()) S.selId = null; render(); },
-    preset: function (el) {
-      var d = new Date(), v = el.dataset.v;
-      if (v === 'clear') S.edit.followUp = '';
-      else {
-        if (v === 'tomorrow') d.setDate(d.getDate() + 1);
-        if (v === '2d') d.setDate(d.getDate() + 2);
-        if (v === 'week') d.setDate(d.getDate() + 7);
-        d.setHours(10, 0, 0, 0);
-        S.edit.followUp = toLocalInput(d.toISOString());
-      }
-      rerenderKeepScroll();
+    filter: function (el) { S.filter = S.filter === el.dataset.v && el.dataset.v !== 'open' ? 'open' : el.dataset.v; S.statusF = ''; render(); },
+    backLive: function () { S.campaign = null; S.selId = null; window.scrollTo(0, 0); render(); },
+    addComment: function () {
+      var t = document.getElementById('ed-comment'), text = (t ? t.value : (S.edit && S.edit.comment) || '').trim();
+      if (!text) { toast('Type a comment first', true); if (t) t.focus(); return; }
+      if (S.edit) S.edit.comment = ''; if (t) { t.value = ''; t.blur(); }
+      saveLead(S.edit ? S.edit.id : S.selId, { comment: text }, 'Added to history');
     },
-    save: saveLead,
-    viewCamp: function (el) { S.campaign = el.dataset.v; S.view = 'leads'; S.filter = 'open'; S.selId = null; window.scrollTo(0, 0); render(); },
+    open: function (el) { openLead(el.dataset.id); },
+    closeSheet: function () {
+      var y = window.scrollY; S.sheet = null; if (!isDesktop()) S.selId = null;
+      S.dirty = false; render(); window.scrollTo(0, y);
+    },
+    preset: function (el) {
+      var d = new Date(), v = el.dataset.v, id = S.edit && S.edit.id; if (!id) return;
+      if (v === 'clear') return saveLead(id, { followUp: '' }, 'Reminder cleared');
+      if (v === 'tomorrow') d.setDate(d.getDate() + 1);
+      if (v === '2d') d.setDate(d.getDate() + 2);
+      if (v === 'week') d.setDate(d.getDate() + 7);
+      d.setHours(10, 0, 0, 0);
+      saveLead(id, { followUp: d.toISOString() }, 'Reminder set for ' + fuLabel(d.toISOString()));
+    },
+    viewCamp: function (el) { S.campaign = el.dataset.v; S.view = 'leads'; S.filter = 'open'; S.statusF = ''; S.person = ''; S.selId = null; window.scrollTo(0, 0); render(); },
     campForm: function (el) { campForm(el.dataset.v || ''); },
     formTeam: function (el) { S.sheet.team = el.dataset.v; if (!S.sheet.original) S.sheet.members = teamMembers(el.dataset.v); rerenderKeepScroll(); },
     formMember: function (el) { var m = S.sheet.members, n = el.dataset.v, i = m.indexOf(n); if (i >= 0) m.splice(i, 1); else m.push(n); rerenderKeepScroll(); },
@@ -937,7 +1040,7 @@
       deferredInstall.prompt();
       deferredInstall.userChoice.then(function () { deferredInstall = null; S.data ? render() : renderLogin(); });
     },
-    changePinForm: function () { S.sheet = { type: 'pin' }; render(); },
+    changePinForm: function () { S.sheet = { type: 'pin', fresh: true }; render(); },
     savePin: function () {
       var f = S.sheet;
       if (!/^\d{4}$/.test(f['new'] || '')) return toast('New passcode must be 4 digits', true);
@@ -974,24 +1077,31 @@
     if (t.dataset.input === 'q') {
       S.q = t.value; var pos = t.selectionStart; render();
       var n = document.querySelector('[data-input="q"]'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (er) {} }
-    } else if (t.dataset.edit && S.edit) { S.edit[t.dataset.edit] = t.value; }
+    } else if (t.dataset.edit === 'comment' && S.edit) { S.edit.comment = t.value; }
     else if (t.dataset.form && S.sheet) { S.sheet[t.dataset.form] = t.type === 'checkbox' ? t.checked : t.value; }
   });
   document.addEventListener('change', function (e) {
     var t = e.target, c = t.dataset.change;
-    if (t.dataset.edit && S.edit) { S.edit[t.dataset.edit] = t.value; return; }
+    if (t.dataset.edit && S.edit) {
+      var id = S.edit.id, f = t.dataset.edit;
+      if (f === 'status') saveLead(id, { status: t.value }, 'Status: ' + t.value);
+      else if (f === 'assigned') saveLead(id, { assigned: t.value }, t.value ? 'Assigned to ' + t.value.split(' ')[0] : 'Unassigned');
+      else if (f === 'followUp') saveLead(id, { followUp: t.value ? new Date(t.value).toISOString() : '' }, t.value ? 'Reminder set for ' + fuLabel(new Date(t.value).toISOString()) : 'Reminder cleared');
+      return;
+    }
     if (t.dataset.form && S.sheet) { S.sheet[t.dataset.form] = t.type === 'checkbox' ? t.checked : t.value; return; }
     if (t.dataset.userfield) {
       var u = D().users.filter(function (x) { return x.name === t.dataset.user; })[0]; if (!u) return;
       var f = t.dataset.userfield, val = t.value.trim();
       if (f === 'email' && val && !validEmail(val)) return toast('That email doesn’t look right', true);
+      if (f === 'photo' && val && !/^https?:\/\//.test(val)) return toast('Paste a full link starting with https://', true);
       var body = { name: u.name }; body[f] = val;
       api('userSave', body).then(function () { u[f] = val; toast('Saved'); }).catch(function (er) { toast(er.message, true); });
       return;
     }
-    if (c === 'campaign') { S.campaign = t.value; S.selId = null; S.dashCamp = null; render(); }
-    else if (c === 'dashCamp') { S.dashCamp = t.value; render(); }
-    else if (c === 'person') { S.person = t.value; render(); }
+    if (c === 'dashCamp') { S.dashCamp = t.value === '__live' ? null : t.value; render(); }
+    else if (c === 'person') { S.person = t.value; S.selId = null; window.scrollTo(0, 0); render(); }
+    else if (c === 'statusF') { S.statusF = t.value; if (t.value) S.filter = 'all'; else if (S.filter === 'all') S.filter = 'open'; render(); }
     else if (c === 'loginName') {
       var L = S.login; L.name = t.value; L.pin = ''; L.msg = ''; L.err = false; L.first = '';
       var n = (L.names || []).filter(function (x) { return x.name === L.name; })[0];
@@ -1010,11 +1120,15 @@
   });
   window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; S.data ? (S.view === 'profile' && render()) : renderLogin(); });
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && S.token && D()) loadData(true); });
+  // hairline under the fixed top bar once the page scrolls
+  window.addEventListener('scroll', function () {
+    var bar = document.querySelector('.lt,.page-head'); if (bar) bar.classList.toggle('scrolled', window.scrollY > 4);
+  }, { passive: true });
   setInterval(function () { if (document.visibilityState === 'visible' && S.token && D()) loadData(true); }, 3 * 60 * 1000);
 
   // ───────── demo backend (runs when no API_URL is set) ─────────
   var Demo = (function () {
-    var KEY = 'leads.demoDB';
+    
     function rng(seed) { return function () { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }; }
     function build() {
       var r = rng(42), pick = function (a) { return a[Math.floor(r() * a.length)]; };
@@ -1026,10 +1140,10 @@
         { name: 'Summer 2026', team: 'Events', start: rel(-198), expiry: rel(-34), brief: '' }
       ];
       var users = [
-        { name: 'Shri', role: 'Admin', team: '', campaigns: [], email: '', active: true, pin: '' },
-        { name: 'Ghada', role: 'Member', team: 'Events', campaigns: ['Q4 26', 'Summer 2026'], email: '', active: true, pin: '' },
-        { name: 'Madelene', role: 'Member', team: 'Events', campaigns: ['Q4 26', 'Summer 2026'], email: '', active: true, pin: '' },
-        { name: 'Sarah', role: 'Member', team: 'Events', campaigns: ['Q4 26', 'Summer 2026'], email: '', active: true, pin: '' },
+        { name: 'Shrikant Trivedi', role: 'Admin', team: '', campaigns: [], email: '', active: true, pin: '' },
+        { name: 'Ghada Elgabry', role: 'Member', team: 'Events', campaigns: ['Q4 26', 'Summer 2026'], email: '', active: true, pin: '' },
+        { name: 'Madelene Espejo', role: 'Member', team: 'Events', campaigns: ['Q4 26', 'Summer 2026'], email: '', active: true, pin: '' },
+        { name: 'Sarah Mansour', role: 'Member', team: 'Events', campaigns: ['Q4 26', 'Summer 2026'], email: '', active: true, pin: '' },
         { name: 'Youssef', role: 'Member', team: 'Sales', campaigns: ['Festive Corporate 2026'], email: '', active: true, pin: '' },
         { name: 'Omar', role: 'Member', team: 'Sales', campaigns: ['Festive Corporate 2026'], email: '', active: true, pin: '' }
       ];
@@ -1052,8 +1166,8 @@
           leads.push(l);
         }
       }
-      mk('Summer 2026', ['Ghada', 'Madelene', 'Sarah'], ['Ad Set 3', 'Ad Set 5', 'TGY 2', 'TGY 4'], ['Less Than 100 Pax', '100 - 200 Pax', '200 - 350 Pax'], -190, -40, 40);
-      mk('Q4 26', ['Ghada', 'Madelene', 'Sarah'], ['Ad Set 2', 'Ad Set 4', 'Ad Set 6', 'TGY - Ad Set 1', 'TGY - Ad Set 2', 'TGY - Ad Set 3'], ['20 - 80 Pax', '90 - 200 Pax', '200 - 350 Pax'], -31, 0, 70);
+      mk('Summer 2026', ['Ghada Elgabry', 'Madelene Espejo', 'Sarah Mansour'], ['Ad Set 3', 'Ad Set 5', 'TGY 2', 'TGY 4'], ['Less Than 100 Pax', '100 - 200 Pax', '200 - 350 Pax'], -190, -40, 40);
+      mk('Q4 26', ['Ghada Elgabry', 'Madelene Espejo', 'Sarah Mansour'], ['Ad Set 2', 'Ad Set 4', 'Ad Set 6', 'TGY - Ad Set 1', 'TGY - Ad Set 2', 'TGY - Ad Set 3'], ['20 - 80 Pax', '90 - 200 Pax', '200 - 350 Pax'], -31, 0, 70);
       mk('Festive Corporate 2026', ['Youssef', 'Omar'], ['Corporate Ad 1', 'Corporate Ad 2'], ['20 - 80 Pax', '90 - 200 Pax'], -12, 0, 22);
       // a few returning people (same phone in Summer and Q4)
       var summer = leads.filter(function (l) { return l.campaign === 'Summer 2026'; }), q4 = leads.filter(function (l) { return l.campaign === 'Q4 26'; });
@@ -1062,8 +1176,8 @@
       q4.slice(-2).forEach(function (l) { l.addedAt = new Date(Date.now() - 20 * 60000).toISOString(); l.date = dayKey(new Date()); l.status = 'New Lead'; l.followUp = ''; });
       return { camps: camps, users: users, leads: leads, sessions: {} };
     }
-    function db() { var x = ls('demoDB'); if (!x) { x = build(); save(x); } return x; }
-    function save(x) { ls('demoDB', x); }
+    function db() { var x = ls('demoDB3'); if (!x) { x = build(); save(x); } return x; }
+    function save(x) { ls('demoDB3', x); }
     function today() { return dayKey(new Date()); }
     function campView(c) { var t = today(); return { name: c.name, team: c.team, start: c.start, expiry: c.expiry, brief: c.brief, active: (!c.start || c.start <= t) && (!c.expiry || c.expiry >= t), upcoming: !!c.start && c.start > t }; }
     function user(x, name) { return x.users.filter(function (u) { return u.name.toLowerCase() === String(name || '').toLowerCase(); })[0]; }
@@ -1077,32 +1191,41 @@
     }
     var H = {
       names: function (x) { return { names: x.users.filter(function (u) { return u.active; }).map(function (u) { return { name: u.name, hasPin: !!u.pin, admin: u.role === 'Admin' }; }) }; },
-      setPin: function (x, b) { var u = user(x, b.name); u.pin = b.pin; var t = 'T' + Math.random().toString(36).slice(2); x.sessions[t] = u.name; return { token: t, name: u.name }; },
-      login: function (x, b) { var u = user(x, b.name); if (!u.pin) return { needsPin: true }; var t = 'T' + Math.random().toString(36).slice(2); x.sessions[t] = u.name; return { token: t, name: u.name }; },
+      setPin: function (x, b) { var u = user(x, b.name); u.pin = b.pin; var t = 'T' + Math.random().toString(36).slice(2); x.sessions[t] = u.name; return { token: t, name: u.name, data: H.data(x, { token: t }) }; },
+      login: function (x, b) { var u = user(x, b.name); if (!u.pin) return { needsPin: true }; var t = 'T' + Math.random().toString(36).slice(2); x.sessions[t] = u.name; return { token: t, name: u.name, data: H.data(x, { token: t }) }; },
       logout: function (x, b) { delete x.sessions[b.token]; return {}; },
       changePin: function (x, b) { var u = auth(x, b.token); u.pin = b.newPin; return {}; },
       data: function (x, b) {
         var u = auth(x, b.token), admin = u.role === 'Admin';
         var camps = x.camps.map(campView).filter(function (c) { return admin || u.campaigns.indexOf(c.name) >= 0; });
         var all = JSON.parse(JSON.stringify(x.leads)).filter(function (l) { return l.status !== 'Duplicate'; }); markRet(all);
-        var scope = all.filter(function (l) { return admin || u.campaigns.indexOf(l.campaign) >= 0; });
+        camps.forEach(function (c) {
+          var mine = all.filter(function (l) { return l.campaign === c.name; });
+          c.stats = { total: mine.length, won: mine.filter(function (l) { return l.status === 'Confirmed'; }).length, open: mine.filter(function (l) { return CLOSED_DEFAULT.indexOf(l.status) < 0; }).length };
+        });
+        var live = camps.filter(function (c) { return c.active || c.upcoming; }).map(function (c) { return c.name; });
         return {
           me: { name: u.name, role: u.role, team: u.team, campaigns: admin ? x.camps.map(function (c) { return c.name; }) : u.campaigns, extId: u.name.toLowerCase() },
-          campaigns: camps, leads: scope.filter(function (l) { return admin || l.assigned === u.name; }),
-          teamRows: scope.map(function (l) { return { _id: l.id, c: l.campaign, s: l.status, a: l.assigned, ad: l.ad, p: l.pax, w: l.when, d: l.date, v: l.venue, r: l.returning ? 1 : 0 }; }),
-          users: x.users.map(function (v) { return { name: v.name, team: v.team, role: v.role, active: v.active, campaigns: admin ? v.campaigns : undefined, email: admin ? v.email : undefined, hasPin: !!v.pin }; }),
+          campaigns: camps, leads: all.filter(function (l) { return live.indexOf(l.campaign) >= 0; }),
+          users: x.users.map(function (v) { return { name: v.name, team: v.team, role: v.role, active: v.active, photo: v.photo || '', campaigns: v.role === 'Admin' ? ['ALL'] : v.campaigns, email: admin ? v.email : undefined, hasPin: !!v.pin }; }),
           statuses: ['New Lead', 'Contacted', 'Awaiting Response', 'Qualified Lead', 'Potential Lead', 'Proposal Sent', 'Follow-Up Required', 'Site Visit Scheduled', 'Site Visit Completed', 'Negotiation in Progress', 'Tentative Hold', 'Confirmed', 'Lost – Price', 'Lost – Date Unavailable', 'Lost – Chose Another Venue', 'Not Potential', 'Duplicate'],
           closed: CLOSED_DEFAULT, oneSignalAppId: '', serverTime: new Date().toISOString()
         };
       },
+      campaignLeads: function (x, b) {
+        var u = auth(x, b.token);
+        if (u.role !== 'Admin' && u.campaigns.indexOf(b.campaign) < 0) throw new Error('You do not have access to this campaign');
+        var all = JSON.parse(JSON.stringify(x.leads)); markRet(all);
+        return { campaign: b.campaign, leads: all.filter(function (l) { return l.campaign === b.campaign; }) };
+      },
       update: function (x, b) {
         var u = auth(x, b.token), l = x.leads.filter(function (y) { return y.id === b.id; })[0];
         if (!l) throw new Error('Lead not found');
-        if (u.role !== 'Admin' && l.assigned !== u.name) throw new Error('This lead is not assigned to you');
+        if (u.role !== 'Admin' && u.campaigns.indexOf(l.campaign) < 0) throw new Error('You do not have access to this campaign');
         if (b.status !== undefined) l.status = b.status;
         if (b.followUp !== undefined) l.followUp = b.followUp;
-        if (b.comment) l.comments = (l.comments ? l.comments + ' || ' : '') + shortDate(today()) + ' (' + u.name + '): ' + b.comment;
-        if (b.assigned !== undefined && u.role === 'Admin') l.assigned = b.assigned;
+        if (b.comment) { var d = new Date(); l.comments = (l.comments ? l.comments + ' || ' : '') + pad(d.getDate()) + '-' + MON[d.getMonth()] + ' (' + u.name + '): ' + b.comment; }
+        if (b.assigned !== undefined) l.assigned = b.assigned;
         l.updatedAt = new Date().toISOString(); l.updatedBy = u.name;
         return { lead: JSON.parse(JSON.stringify(l)) };
       },
@@ -1124,7 +1247,7 @@
         var a = auth(x, b.token); if (a.role !== 'Admin') throw new Error('Admin only');
         var u = user(x, b.name);
         if (!u) { x.users.push({ name: b.name, role: 'Member', team: b.team || '', campaigns: b.campaigns || [], email: b.email || '', active: true, pin: '' }); return {}; }
-        ['team', 'email', 'active', 'campaigns', 'role'].forEach(function (k) { if (b[k] !== undefined) u[k] = b[k]; });
+        ['team', 'email', 'active', 'campaigns', 'role', 'photo'].forEach(function (k) { if (b[k] !== undefined) u[k] = b[k]; });
         return {};
       },
       resetPin: function (x, b) { var a = auth(x, b.token); if (a.role !== 'Admin') throw new Error('Admin only'); user(x, b.name).pin = ''; return {}; }
@@ -1139,7 +1262,7 @@
           }, 220);
         });
       },
-      reset: function () { ls('demoDB', null); }
+      reset: function () { ls('demoDB3', null); }
     };
   })();
   window.LeadsDemoReset = Demo.reset;
@@ -1152,7 +1275,7 @@
     ls('seen', Date.now());
     var cached = ls('cache');
     if (cached && cached.data) {
-      S.data = cached.data; S.campaign = defaultCampaign(); render(); afterHoursCheck(); initPush();
+      S.data = cached.data; render(); afterHoursCheck(); initPush();
       loadData(true);
     } else loadData();
   } else { renderLogin(); loadNames(); }
