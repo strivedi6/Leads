@@ -1,7 +1,7 @@
 // Opens instantly: the app files are served from the phone, then quietly refreshed in the background
 // (the next open picks up any new version). Lead data never goes through here – it comes from
 // Google Sheets and is kept by the app itself.
-var CACHE = 'leads-v3';
+var CACHE = 'leads-v5';
 var SHELL = ['./', './index.html', './app.js', './config.js', './manifest.webmanifest',
   './icons/logo.png', './icons/icon-192.png', './icons/icon-512.png', './favicon.ico'];
 

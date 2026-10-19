@@ -784,10 +784,11 @@
   function loadData(silent) {
     if (!silent && !D()) APP.innerHTML = '<div class="loading"><div class="spin"></div>Loading your leads…</div>';
     var askedAt = Date.now();
-    return api('data').then(function (r) { gotData(r, silent, askedAt); }).catch(function (e) {
-      if (!S.token) return;
+    return api('data').then(function (r) { gotData(r, silent, askedAt); return true; }).catch(function (e) {
+      if (!S.token) return false;
       if (!D()) APP.innerHTML = '<div class="loading" style="flex-direction:column;text-align:center;padding:24px"><strong style="color:var(--blue)">Couldn’t load your leads</strong><span>' + h(e.message) + '</span><button class="btn btn-blue" style="padding:0 18px;margin-top:10px" data-act="retry">Try again</button></div>';
       else if (!silent) toast(e.message, true);
+      return false;
     });
   }
   function gotData(r, silent, askedAt) {
@@ -889,7 +890,8 @@
         appId: id,
         serviceWorkerPath: BASE.replace(/^\//, '') + 'OneSignalSDKWorker.js',
         serviceWorkerParam: { scope: BASE + 'onesignal/' },
-        notifyButton: { enable: false }, allowLocalhostAsSecureOrigin: true
+        notifyButton: { enable: false }, allowLocalhostAsSecureOrigin: true,
+        welcomeNotification: { title: 'GC&E Leads', message: 'Notifications are on. You’ll hear about new leads, reminders and your 10 AM summary.' }
       }).then(function () { return OneSignal.login(D().me.extId); }).then(function () { if (S.view === 'leads') softRender(); });
     });
   }
@@ -1120,6 +1122,50 @@
   });
   window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; S.data ? (S.view === 'profile' && render()) : renderLogin(); });
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && S.token && D()) loadData(true); });
+  // ───────── pull down to refresh (phones) ─────────
+  (function () {
+    var startY = null, dist = 0, busy = false, el = null, LIMIT = 70;
+    var arrow = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
+    function ind() {
+      if (!el) { el = document.createElement('div'); el.id = 'ptr'; el.setAttribute('aria-hidden', 'true'); document.body.appendChild(el); }
+      return el;
+    }
+    function canPull(t) {
+      if (busy || !S.token || !D() || isDesktop() || S.sheet) return false;
+      if (document.getElementById('ah') || window.scrollY > 0) return false;
+      return !(t.closest && t.closest('.chips,.scroll-x,input,textarea,select'));
+    }
+    function hide() { var e = ind(); e.className = 'back'; e.style.transform = 'translateY(-70px)'; e.style.opacity = '0'; }
+    document.addEventListener('touchstart', function (e) {
+      startY = canPull(e.target) ? e.touches[0].clientY : null; dist = 0;
+    }, { passive: true });
+    document.addEventListener('touchmove', function (e) {
+      if (startY == null) return;
+      var dy = e.touches[0].clientY - startY;
+      if (dy <= 0 || window.scrollY > 0) { if (dist) hide(); startY = dy <= 0 ? startY : null; dist = 0; return; }
+      e.preventDefault();
+      dist = Math.min(dy * 0.5, LIMIT * 1.6);
+      var x = ind(); x.className = dist >= LIMIT ? 'ready' : ''; if (!x.innerHTML || x.querySelector('.spin')) x.innerHTML = arrow;
+      x.style.transform = 'translateY(' + (dist - 10) + 'px)'; x.style.opacity = String(Math.min(1, dist / 40));
+    }, { passive: false });
+    document.addEventListener('touchend', function () {
+      if (startY == null) return;
+      startY = null;
+      if (dist < LIMIT) { hide(); dist = 0; return; }
+      dist = 0; busy = true;
+      var x = ind(); x.className = 'back'; x.style.transform = 'translateY(50px)'; x.style.opacity = '1'; x.innerHTML = '<div class="spin"></div>';
+      if (navigator.vibrate) try { navigator.vibrate(10); } catch (er) {}
+      // a past campaign being viewed is fetched again too
+      if (S.campaign != null && !isLiveCamp(S.campaign)) { delete S.past[S.campaign]; }
+      var t0 = Date.now();
+      loadData(true).then(function (ok) {
+        if (S.campaign != null && !isLiveCamp(S.campaign) && !S.past[S.campaign]) loadPast(S.campaign);
+        rerenderKeepScroll();
+        setTimeout(function () { busy = false; hide(); toast(ok ? 'Up to date' : 'Couldn’t refresh – check your connection', !ok); }, Math.max(0, 500 - (Date.now() - t0)));
+      });
+    });
+  })();
+
   // hairline under the fixed top bar once the page scrolls
   window.addEventListener('scroll', function () {
     var bar = document.querySelector('.lt,.page-head'); if (bar) bar.classList.toggle('scrolled', window.scrollY > 4);
