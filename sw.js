@@ -1,6 +1,6 @@
 // App-shell cache so the app opens fast and installs as an app.
 // Data always comes live from Google Sheets; only the app files are cached.
-var CACHE = 'leads-v1';
+var CACHE = 'leads-v2';
 var SHELL = ['./', './index.html', './app.js', './config.js', './manifest.webmanifest',
   './icons/logo.png', './icons/icon-192.png', './icons/icon-512.png', './favicon.ico'];
 

@@ -272,14 +272,12 @@
     var all = scopedLeads(), c = counts(all), list = applyFilter(all);
     var first = D().me.name.split(' ')[0];
     var live = S.campaign === '__active' || (campByName(S.campaign) || {}).active;
-    var top = '<header class="top"><div class="top-row" style="flex:1;min-width:260px"><div style="display:flex;flex-direction:column;gap:4px;min-width:0">' +
-      '<span class="eyebrow">' + h(C.SUBTITLE || '') + '</span>' +
-      '<h1>' + greeting() + ', ' + h(first) + '</h1>' +
-      '<label class="camp-pick" style="margin-top:4px"><span class="live-dot" style="' + (live ? '' : 'background:#BDB3AF') + '"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + h(campChipText()) + '</span>' + I.down + campSelect(S.campaign, 'campaign') + '</label>' +
-      '</div>' + pushBell() + '</div>' +
-      '<div class="stats">' +
+    var top = '<header class="lt"><div class="lt-row"><div style="display:flex;flex-direction:column;gap:2px;min-width:0">' +
+      '<span class="eyebrow">' + h(C.SUBTITLE || '') + '</span><h1>' + greeting() + ', ' + h(first) + '</h1></div>' + pushBell() + '</div>' +
+      '<label class="camp-pick"><span class="live-dot" style="' + (live ? '' : 'background:#AEAEB2') + '"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + h(campChipText()) + '</span>' + I.down + campSelect(S.campaign, 'campaign') + '</label></header>' +
+      '<section class="stat-hero"><span class="lbl">' + (isAdmin() && !S.person ? 'Team today' : 'Your day') + '</span><div class="stats">' +
       statBtn('new', c.newl, 'New leads') + statBtn('today', c.today, 'Due today') + statBtn('over', c.over, 'Overdue', true) +
-      '</div></header>';
+      '</div></section>';
     var tools = '<div class="page" style="padding-bottom:0">' + pushBanner() +
       '<label class="search">' + I.search + '<input type="search" data-input="q" value="' + h(S.q) + '" placeholder="Search name, phone or email" aria-label="Search leads"></label>' +
       '<div class="chips">' + chip('open', 'Open · ' + c.open) + chip('new', 'New · ' + c.newl) + chip('today', 'Due today · ' + c.today) + chip('over', 'Overdue · ' + c.over, true) +
@@ -289,7 +287,7 @@
     if (isDesktop()) {
       var sel = S.selId ? findLead(S.selId) : null;
       body = '<div class="page"><div class="desk-split"><div class="list-col">' + (list.length ? leadTable(list) : emptyLeads()) + '</div>' +
-        '<aside class="detail-col" aria-label="Selected lead">' + (sel ? '<div class="box" style="padding:20px">' + detailInner(sel) + '</div>' : '<div class="empty"><strong>Pick a lead</strong>Its details, call buttons and follow-up reminder open here.</div>') + '</aside></div></div>';
+        '<aside class="detail-col" aria-label="Selected lead">' + (sel ? detailInner(sel) : '<div class="empty"><strong>Pick a lead</strong>Its details, call buttons and follow-up reminder open here.</div>') + '</aside></div></div>';
     } else {
       body = '<div class="page">' + (list.length ? list.slice(0, 200).map(leadCard).join('') + (list.length > 200 ? '<p class="hint" style="text-align:center">Showing 200 of ' + list.length + '. Search to find others.</p>' : '') : emptyLeads()) + '</div>';
     }
@@ -431,18 +429,18 @@
     var past = camps.filter(function (c) { return !c.active && !c.upcoming && !c.unsorted; }).sort(function (a, b) { return (b.expiry || '').localeCompare(a.expiry || ''); });
     var uns = camps.filter(function (c) { return c.unsorted; })[0];
     var head = '<header class="page-head"><div><h1>Campaigns</h1><p>' + (isAdmin() ? 'Admin · all teams' : 'Campaigns you can see') + '</p></div>' +
-      (isAdmin() ? '<div style="display:flex;gap:6px"><button class="btn btn-line mob-only" style="width:44px;padding:0" data-act="nav" data-v="access" aria-label="Team and access">' + I.access + '</button><button class="btn btn-blue" style="padding:0 14px" data-act="campForm">' + I.plus + 'New</button></div>' : '') + '</header>';
+      (isAdmin() ? '<div style="display:flex;gap:6px"><button class="icon-btn mob-only" data-act="nav" data-v="access" aria-label="Team and access">' + I.access + '</button><button class="btn btn-blue" style="padding:0 16px;height:40px;border-radius:20px" data-act="campForm">' + I.plus + 'New</button></div>' : '') + '</header>';
     function liveCard(c, i) {
       var st = campStats(c.name), dl = daysLeft(c), mem = membersOf(c.name);
       var dark = i === 0;
       return '<article class="camp-card ' + (dark ? 'live' : 'other') + '">' +
-        '<div class="row-between" style="align-items:flex-start"><div style="display:flex;flex-direction:column;gap:4px;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="cname" style="' + (dark ? '' : 'color:var(--blue)') + '">' + h(c.name) + '</span>' + (c.team ? '<span class="tag team"' + (dark ? '' : ' style="background:#E3F0F4;color:var(--turq-ink)"') + '>' + h(c.team.toUpperCase()) + ' TEAM</span>' : '') + '</div>' +
+        '<div class="row-between" style="align-items:flex-start"><div style="display:flex;flex-direction:column;gap:4px;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="cname" style="' + (dark ? '' : 'color:var(--blue)') + '">' + h(c.name) + '</span>' + (c.team ? '<span class="tag team"' + (dark ? '' : ' style="background:rgba(0,114,147,.12);color:var(--turq-ink)"') + '>' + h(c.team.toUpperCase()) + ' TEAM</span>' : '') + '</div>' +
         '<span style="font-size:13px;opacity:.85">' + (c.start ? h(shortDate(c.start)) : '') + (c.expiry ? ' – ' + h(longDate(c.expiry)) : '') + (dl !== '' ? ' · ' + plural(dl, 'day') + ' left' : '') + '</span></div><span class="tag live">LIVE</span></div>' +
         '<div style="display:flex;gap:16px;font-size:13px"><span><b style="font-size:18px">' + st.total + '</b> leads</span><span><b style="font-size:18px">' + st.won + '</b> confirmed</span></div>' +
         (c.brief ? '<p style="margin:0;font-size:13px;line-height:1.5;' + (dark ? 'background:rgba(255,255,255,.08);' : 'background:var(--bg);') + 'border-radius:10px;padding:10px 12px"><strong>Brief:</strong> ' + h(c.brief) + '</p>' : '') +
         (isAdmin() ? '<div style="font-size:13px;opacity:.9">' + (mem.length ? 'Access: ' + h(mem.join(', ')) : 'Nobody has access yet') + '</div>' : '') +
-        '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ' + (dark ? 'btn-light' : 'btn-blue') + '" style="padding:0 14px;height:40px" data-act="viewCamp" data-v="' + h(c.name) + '">View leads</button>' +
-        (isAdmin() ? '<button class="btn" style="padding:0 14px;height:40px;background:transparent;border:1.5px solid ' + (dark ? 'rgba(255,255,255,.4)' : 'var(--chip)') + ';color:inherit" data-act="campForm" data-v="' + h(c.name) + '">Edit</button>' : '') + '</div></article>';
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;position:relative;z-index:1"><button class="btn ' + (dark ? '' : 'btn-blue') + '" style="padding:0 16px;height:40px;border-radius:20px;' + (dark ? 'background:#fff;color:var(--blue)' : '') + '" data-act="viewCamp" data-v="' + h(c.name) + '">View leads</button>' +
+        (isAdmin() ? '<button class="btn" style="padding:0 16px;height:40px;border-radius:20px;background:' + (dark ? 'rgba(255,255,255,.16)' : 'var(--fill2)') + ';color:inherit" data-act="campForm" data-v="' + h(c.name) + '">Edit</button>' : '') + '</div></article>';
     }
     function row(c, tag, cls) {
       var st = campStats(c.name);
@@ -506,7 +504,7 @@
         '<label class="hint">Email for 10 AM summary<input class="inp" style="height:40px;margin-top:4px" type="email" value="' + h(u.email || '') + '" placeholder="name@hilton.com" data-userfield="email" data-user="' + h(u.name) + '"></label>' +
         '<button class="btn btn-line" style="height:40px;padding:0 12px;font-size:13px" data-act="toggleActive" data-v="' + h(u.name) + '">' + (u.active ? 'Switch off' : 'Switch on') + '</button></div></article>';
     }).join('');
-    return '<header class="page-head"><div><h1>Team &amp; access</h1><p>Tick a campaign to let that person see its leads and get its notifications</p></div><button class="btn btn-line mob-only" style="padding:0 12px" data-act="nav" data-v="campaigns">' + I.back + '</button></header>' +
+    return '<header class="page-head"><div><h1>Team &amp; access</h1><p>Tick a campaign to let that person see its leads and get its notifications</p></div><button class="icon-btn mob-only" data-act="nav" data-v="campaigns" aria-label="Back to campaigns">' + I.back + '</button></header>' +
       '<div class="page">' + (isDesktop() ? '<div class="cards-2">' + cards + '</div>' : cards) +
       '<div class="box"><div class="lbl">Add team member</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">' +
       '<input class="inp" id="nu-name" placeholder="Name (as in Assigned column)" aria-label="Name"><select class="inp" id="nu-team" aria-label="Team"><option>Events</option><option>Sales</option></select><input class="inp" id="nu-email" type="email" placeholder="Email (optional)" aria-label="Email"></div>' +
@@ -561,10 +559,10 @@
       return '<tr><td><strong style="color:var(--blue)">' + h(p) + '</strong></td><td class="num"><b>' + pr.length + '</b></td><td class="num">' + c(function (r) { return /^New/.test(r.s); }) + '</td><td class="num">' + c(function (r) { return /Contacted|Awaiting/.test(r.s); }) + '</td><td class="num">' + c(function (r) { return /Proposal|Qualified|Site|Negotiation|Tentative|Follow/.test(r.s); }) + '</td><td class="num" style="color:var(--teal-ink);font-weight:700">' + c(function (r) { return r.s === 'Confirmed'; }) + '</td><td class="num">' + c(function (r) { return closed.indexOf(r.s) >= 0 && r.s !== 'Confirmed'; }) + '</td></tr>';
     }).join('');
 
-    var head = '<header class="top"><div style="display:flex;flex-direction:column;gap:4px"><h1>Dashboard</h1><span style="font-size:13px;opacity:.85">' + h(campLabel(camp)) + ' · ' + plural(n, 'lead') + '</span></div>' +
-      '<div style="display:flex;flex-direction:column;gap:10px;min-width:260px">' +
-      (admin ? '' : '<div class="seg" role="tablist"><button role="tab" aria-selected="' + (scope === 'mine') + '" class="' + (scope === 'mine' ? 'on' : '') + '" data-act="dashScope" data-v="mine">My leads</button><button role="tab" aria-selected="' + (scope === 'team') + '" class="' + (scope === 'team' ? 'on' : '') + '" data-act="dashScope" data-v="team">Team</button></div>') +
-      '<label class="camp-pick" style="height:38px;border-radius:12px;padding:0 12px"><span style="flex:1">' + h(campLabel(camp)) + '</span>' + I.down + campSelect(camp, 'dashCamp') + '</label></div></header>';
+    var head = '<header class="lt"><div class="lt-row"><div><h1>Dashboard</h1><p>' + h(campLabel(camp)) + ' · ' + plural(n, 'lead') + '</p></div></div>' +
+      '<label class="camp-pick"><span class="live-dot"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + h(campLabel(camp)) + '</span>' + I.down + campSelect(camp, 'dashCamp') + '</label>' +
+      (admin ? '' : '<div class="seg" role="tablist" style="margin-top:6px"><button role="tab" aria-selected="' + (scope === 'mine') + '" class="' + (scope === 'mine' ? 'on' : '') + '" data-act="dashScope" data-v="mine">My leads</button><button role="tab" aria-selected="' + (scope === 'team') + '" class="' + (scope === 'team' ? 'on' : '') + '" data-act="dashScope" data-v="team">Team</button></div>') +
+      '</header>';
     if (!n) return head + '<div class="page"><div class="empty"><strong>No leads yet</strong>Numbers appear here as soon as leads arrive in this campaign.</div></div>';
     return head + '<div class="page">' +
       '<div class="kpis">' +
@@ -612,47 +610,67 @@
 
   // ── Sheets (mobile lead detail, campaign form, passcode) ──
   function sheetHtml() {
-    var s = S.sheet, title = '', body = '', foot = '';
+    var s = S.sheet, title = '', body = '', act = '', label = 'Save';
     if (s.type === 'lead') {
       var l = findLead(s.id); if (!l) { S.sheet = null; return ''; }
-      title = 'Lead'; body = detailInner(l);
-      foot = '<button class="btn btn-blue btn-big" data-act="save"' + (S.saving ? ' disabled' : '') + '>' + (S.saving ? 'Saving…' : 'Save update') + '</button>';
+      title = 'Lead'; body = detailInner(l); act = 'save';
     } else if (s.type === 'camp') {
-      title = s.original ? 'Edit campaign' : 'New campaign'; body = campFormHtml();
-      foot = '<button class="btn btn-blue btn-big" data-act="saveCamp"' + (S.saving ? ' disabled' : '') + '>' + (S.saving ? 'Saving…' : (s.original ? 'Save changes' : 'Create campaign')) + '</button>';
+      title = s.original ? 'Edit Campaign' : 'New Campaign'; body = campFormHtml(); act = 'saveCamp'; label = s.original ? 'Save' : 'Create';
     } else if (s.type === 'pin') {
-      title = 'Change passcode'; body = changePinHtml();
-      foot = '<button class="btn btn-blue btn-big" data-act="savePin">Save passcode</button>';
+      title = 'Passcode'; body = changePinHtml(); act = 'savePin';
     }
     var wrapStyle = isDesktop() ? ' style="inset:auto;top:0;right:0;bottom:0;width:440px;z-index:70;box-shadow:-10px 0 40px rgba(0,17,55,.18)"' : '';
-    return (isDesktop() ? '<div class="overlay" style="background:rgba(0,17,55,.35)" data-act="closeSheet"></div>' : '') +
-      '<div class="sheet-wrap" role="dialog" aria-modal="true" aria-label="' + h(title) + '"' + wrapStyle + '><div class="sheet-head"><button class="back" data-act="closeSheet" aria-label="Close">' + I.back + '</button><span class="title">' + h(title) + '</span>' + (isAdmin() && s.type === 'camp' ? '<span style="width:44px;font-size:11px;font-weight:700;color:var(--red-ink)">ADMIN</span>' : '<span style="width:44px"></span>') + '</div>' +
-      '<div class="sheet-body">' + body + '</div><div class="sheet-foot">' + foot + '</div></div>';
+    return (isDesktop() ? '<div class="overlay" style="z-index:65" data-act="closeSheet"></div>' : '') +
+      '<div class="sheet-wrap" role="dialog" aria-modal="true" aria-label="' + h(title) + '"' + wrapStyle + '><div class="sheet-head">' +
+      '<button class="nav-txt" data-act="closeSheet">' + (s.type === 'lead' ? 'Close' : 'Cancel') + '</button><span class="title">' + h(title) + '</span>' +
+      '<button class="nav-txt strong" data-act="' + act + '"' + (S.saving ? ' disabled' : '') + '>' + (S.saving ? 'Saving…' : label) + '</button></div>' +
+      '<div class="sheet-body">' + body + '</div></div>';
   }
 
   // ───────── Login ─────────
+  var QUOTES = [
+    'Every booking starts with a single call.',
+    'Great events begin with a great first reply.',
+    'Today’s lead is next month’s celebration.',
+    'Fast follow-ups win the date.',
+    'Behind every wedding is a salesperson who called back.'
+  ];
   function renderLogin() {
     var L = S.login, names = L.names;
-    var prompt = L.stage === 'create' ? 'Create your 4-digit passcode' : (L.stage === 'confirm' ? 'Enter it once more to confirm' : 'Enter your passcode');
-    var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'];
-    APP.innerHTML = '<div class="login"><div class="login-in">' +
-      (DEMO ? '<div class="demo-flag" style="border-radius:10px">Demo mode – any passcode works</div>' : '') +
-      '<div class="brand"><div class="logo-tile"><img src="icons/logo.png" alt="Embassy Suites by Hilton"></div><h1>Leads</h1><span class="eyebrow">' + h(C.SUBTITLE || '') + '</span></div>' +
-      (names == null ? '<div class="loading" style="min-height:120px;color:#fff"><div class="spin"></div>Loading team…</div>' :
-        '<div class="field-dark"><label for="who">Who are you?</label><select id="who" data-change="loginName">' +
+    var me = names ? names.filter(function (n) { return n.name === L.name; })[0] : null;
+    var first = L.name ? L.name.split(' ')[0] : '';
+    var title = !L.name ? 'Welcome' : (L.stage === 'enter' ? 'Welcome back, ' + first : 'Hello, ' + first);
+    if (S.quoteIdx == null) S.quoteIdx = Math.floor(Math.random() * QUOTES.length);
+    APP.innerHTML = '<div class="login">' +
+      (DEMO ? '<div class="demo-flag">Demo mode – any passcode works</div>' : '') +
+      '<header class="hero"><div class="logo-tile"><img src="icons/logo.png" alt="Embassy Suites by Hilton"></div><h1>Leads</h1><p>' + h(C.SUBTITLE || '') + '</p></header>' +
+      '<section class="auth-card">' +
+      (names == null ? '<div class="loading" style="min-height:120px"><div class="spin"></div>Loading team…</div>' :
+        '<h2>' + h(title) + '</h2><p class="auth-quote">“' + h(QUOTES[S.quoteIdx]) + '”</p>' +
+        '<div><label class="lbl" for="who" style="display:block;margin-bottom:6px">Your name</label><select id="who" class="select-ios" data-change="loginName">' +
         '<option value="">Choose your name</option>' +
         names.map(function (n) { return '<option value="' + h(n.name) + '"' + (n.name === L.name ? ' selected' : '') + '>' + h(n.name) + (n.admin ? ' (Admin)' : '') + '</option>'; }).join('') + '</select></div>' +
-        (L.name ? '<div class="pin-area"><span style="font-size:15px;font-weight:600">' + prompt + '</span><div class="dots" role="img" aria-label="' + L.pin.length + ' of 4 digits entered">' +
-          [0, 1, 2, 3].map(function (i) { return '<span class="dot' + (i < L.pin.length ? ' on' : '') + '"></span>'; }).join('') + '</div>' +
-          '<div class="pin-msg ' + (L.err ? 'err' : 'ok') + '" role="status">' + h(L.msg) + '</div></div>' +
-          '<div class="keypad">' + keys.map(function (k) {
-            if (!k) return '<span></span>';
-            if (k === 'del') return '<button class="key ghost" data-act="key" data-k="del" aria-label="Delete">⌫</button>';
-            return '<button class="key" data-act="key" data-k="' + k + '"' + (L.busy ? ' disabled' : '') + '>' + k + '</button>';
-          }).join('') + '</div>' : '')) +
-      '<div class="login-foot">' + installHtml(false) +
-      (L.name ? '<button class="linkish" data-act="forgot" style="color:var(--off)">Forgot passcode?</button>' : '') + '</div>' +
-      '</div></div>';
+        (L.name ? '<p class="auth-label" id="pin-label">' + h(pinPrompt()) + '</p>' +
+          '<div class="pin-wrap" id="pin-wrap">' + [0, 1, 2, 3].map(function (i) { return '<div class="pin-box" aria-hidden="true"></div>'; }).join('') +
+          '<input id="pin" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="4-digit passcode"' + (L.busy ? ' disabled' : '') + '></div>' +
+          '<div class="pin-msg ' + (L.err ? 'err' : 'ok') + '" id="pin-msg" role="status">' + h(L.msg) + '</div>' +
+          '<p class="hint" style="text-align:center">' + (me && !me.hasPin ? 'First time? Choose any 4 digits you’ll remember.' : 'Forgot it? Ask ' + h(findAdminName() || 'your admin') + ' to reset it.') + '</p>' : '')) +
+      '</section>' +
+      '<div class="auth-foot">' + installHtml(false) + '</div></div>';
+    paintPin();
+  }
+  function pinPrompt() { var L = S.login; return L.stage === 'create' ? 'Create your 4-digit passcode' : (L.stage === 'confirm' ? 'Enter it once more to confirm' : 'Enter your passcode'); }
+  function paintPin(err) {
+    var boxes = document.querySelectorAll('.pin-box'), L = S.login, inp = document.getElementById('pin');
+    if (!boxes.length) return;
+    var focused = inp && document.activeElement === inp;
+    for (var i = 0; i < 4; i++) {
+      boxes[i].className = 'pin-box' + (i < L.pin.length ? ' on' : '') + (focused && i === L.pin.length ? ' cur' : '') + (err ? ' err' : '');
+      boxes[i].textContent = i < L.pin.length ? '•' : '';
+    }
+    var lab = document.getElementById('pin-label'); if (lab) lab.textContent = pinPrompt();
+    var msg = document.getElementById('pin-msg'); if (msg) { msg.textContent = L.msg; msg.className = 'pin-msg ' + (L.err ? 'err' : 'ok'); }
+    if (inp) inp.value = L.pin;
   }
   function loadNames() {
     api('names').then(function (r) {
@@ -663,28 +681,28 @@
       renderLogin();
     }).catch(function (e) { S.login.names = []; S.login.msg = e.message; S.login.err = true; renderLogin(); toast(e.message, true); });
   }
-  function pressKey(k) {
+  function pinInput(val) {
     var L = S.login; if (L.busy) return;
-    if (k === 'del') { L.pin = L.pin.slice(0, -1); L.msg = ''; return renderLogin(); }
-    if (L.pin.length >= 4) return;
-    L.pin += k; L.msg = ''; L.err = false; renderLogin();
+    L.pin = String(val || '').replace(/\D/g, '').slice(0, 4); L.msg = ''; L.err = false; paintPin();
     if (L.pin.length < 4) return;
     var pin = L.pin;
-    if (L.stage === 'create') { L.first = pin; L.pin = ''; L.stage = 'confirm'; return setTimeout(renderLogin, 180); }
+    if (L.stage === 'create') { L.first = pin; L.pin = ''; L.stage = 'confirm'; setTimeout(function () { paintPin(); }, 150); return; }
     L.busy = true;
     var call = L.stage === 'confirm'
       ? (pin === L.first ? api('setPin', { name: L.name, pin: pin }) : Promise.reject(new Error('Passcodes didn’t match. Try again.')))
       : api('login', { name: L.name, pin: pin });
     call.then(function (r) {
       L.busy = false;
-      if (r.needsPin) { L.stage = 'create'; L.pin = ''; L.msg = 'Set up your passcode first'; L.err = false; return renderLogin(); }
+      if (r.needsPin) { L.stage = 'create'; L.pin = ''; L.msg = 'Set up your passcode first'; L.err = false; return paintPin(); }
       S.token = r.token; ls('token', r.token); ls('lastName', L.name);
-      L.pin = ''; L.msg = 'Welcome, ' + L.name.split(' ')[0]; L.err = false; renderLogin();
+      L.pin = ''; L.msg = 'Welcome, ' + L.name.split(' ')[0]; L.err = false; paintPin();
+      var inp = document.getElementById('pin'); if (inp) inp.blur();
       loadData();
     }).catch(function (e) {
       L.busy = false; L.pin = ''; L.err = true; L.msg = e.message;
       if (L.stage === 'confirm') { L.stage = 'create'; L.first = ''; }
-      renderLogin();
+      paintPin(true);
+      if (navigator.vibrate) try { navigator.vibrate(80); } catch (x) {}
     });
   }
 
@@ -850,8 +868,8 @@
     var old = document.getElementById('ah'); if (old) old.remove();
     var el = document.createElement('div'); el.id = 'ah'; el.className = 'overlay';
     el.innerHTML = '<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="ah-t"><div class="dialog-top"><div class="moon">' + (S.ahKind === 'early' ? I.sun : I.moon) + '</div>' +
-      '<span style="font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--turq-ink)">' + DOW[now.getDay()] + ' · ' + timeStr(now) + '</span><h2 id="ah-t">' + h(m[0]) + '</h2></div>' +
-      '<div class="dialog-body"><p>' + h(m[1]) + '</p><div style="display:flex;flex-direction:column;gap:6px"><button class="btn btn-blue btn-big" data-act="ahClose">Got it – I’ll be quick</button><button class="linkish" style="height:40px;color:var(--blue);font-weight:600;font-size:14px" data-act="ahNext">Show another message</button></div></div></div>';
+      '<span style="font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">' + DOW[now.getDay()] + ' · ' + timeStr(now) + '</span><h2 id="ah-t">' + h(m[0]) + '</h2></div>' +
+      '<div class="dialog-body"><p>' + h(m[1]) + '</p><div class="dialog-actions"><button class="strong" data-act="ahClose">Got it – I’ll be quick</button><button data-act="ahNext">Show another message</button></div></div></div>';
     document.body.appendChild(el);
     var b = el.querySelector('button'); if (b) b.focus();
   }
@@ -926,7 +944,6 @@
       api('changePin', { oldPin: f.old, newPin: f['new'] }).then(function () { S.sheet = null; render(); toast('Passcode changed'); }).catch(function (e) { toast(e.message, true); });
     },
     signOut: function () { if (confirm('Sign out of the Leads app?')) signOut(); },
-    key: function (el) { pressKey(el.dataset.k); },
     forgot: function () { toast('Ask ' + (findAdminName() || 'your admin') + ' to reset your passcode in Team & access.'); },
     retry: function () { loadData(); },
     ahClose: function () { var e = document.getElementById('ah'); if (e) e.remove(); },
@@ -949,14 +966,11 @@
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && e.target.matches && e.target.matches('tr[data-act="open"]')) { openLead(e.target.dataset.id); return; }
-    if (!S.data && S.login.name && document.querySelector('.keypad') && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) {
-      if (/^\d$/.test(e.key)) { pressKey(e.key); e.preventDefault(); }
-      else if (e.key === 'Backspace') { pressKey('del'); e.preventDefault(); }
-    }
     if (e.key === 'Escape') { var ah = document.getElementById('ah'); if (ah) ah.remove(); else if (S.sheet) { S.sheet = null; render(); } }
   });
   document.addEventListener('input', function (e) {
     var t = e.target;
+    if (t.id === 'pin') { pinInput(t.value); return; }
     if (t.dataset.input === 'q') {
       S.q = t.value; var pos = t.selectionStart; render();
       var n = document.querySelector('[data-input="q"]'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (er) {} }
@@ -982,8 +996,13 @@
       var L = S.login; L.name = t.value; L.pin = ''; L.msg = ''; L.err = false; L.first = '';
       var n = (L.names || []).filter(function (x) { return x.name === L.name; })[0];
       L.stage = n && !n.hasPin ? 'create' : 'enter'; renderLogin();
+      var p = document.getElementById('pin'); if (p) try { p.focus(); } catch (er) {}
     }
   });
+  // no pinch or double-tap zoom (iOS ignores user-scalable=no on its own)
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (ev) { document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false }); });
+  document.addEventListener('focusin', function (e) { if (e.target.id === 'pin') paintPin(); });
+  document.addEventListener('focusout', function (e) { if (e.target.id === 'pin') setTimeout(paintPin, 0); });
   var lastWide = isDesktop();
   window.addEventListener('resize', function () {
     var w = isDesktop(); if (w === lastWide) return; lastWide = w;
