@@ -213,6 +213,7 @@
   function userBy(n) { return ((D() && D().users) || []).filter(function (u) { return u.name === n; })[0]; }
   function photoUrl(u) {
     var p = u && u.photo; if (!p) return '';
+    if (/^data:image\//.test(p)) return p;
     var m = p.match(/(?:\/d\/|[?&]id=)([\w-]{20,})/);
     if (m && /google\.com/.test(p)) return 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w200';
     return /^https?:\/\//.test(p) ? p : '';
@@ -232,7 +233,9 @@
     if (S.sheet && !isDesktop()) html += sheetHtml();
     else if (S.sheet && S.sheet.type !== 'lead') html += sheetHtml();
     APP.innerHTML = html;
-    if (S.sheet) S.sheet.fresh = false;   // slide up only when it first opens
+    if (S.sheet) S.sheet.fresh = false;
+    var tb = document.querySelector('.tools-bar');
+    if (tb) document.documentElement.style.setProperty('--tools-h', tb.offsetHeight + 'px');   // slide up only when it first opens
   }
   function isDesktop() { return window.matchMedia('(min-width: 1024px)').matches; }
 
@@ -311,8 +314,9 @@
     if (S.campaign != null) {
       banner = '<div class="past-banner"><span>' + (isLiveCamp(S.campaign) ? 'Showing only <b>' : 'Looking back at <b>') + h(campLabel(S.campaign)) + '</b></span><button data-act="backLive">' + (activeCamps().length ? 'Back to live' : 'Close') + '</button></div>';
     }
-    var tools = '<div class="page" style="padding-bottom:0">' + pushBanner() + banner +
-      '<label class="search">' + I.search + '<input type="search" data-input="q" value="' + h(S.q) + '" placeholder="Search name, phone or email" aria-label="Search leads"></label>' +
+    var pb = pushBanner() + banner;
+    var tools = (pb ? '<div class="page" style="padding-bottom:0">' + pb + '</div>' : '') +
+      '<div class="tools-bar"><label class="search">' + I.search + '<input type="search" data-input="q" value="' + h(S.q) + '" placeholder="Search name, phone or email" aria-label="Search leads"></label>' +
       '<div class="chips">' + chip('open', 'Open · ' + c.open) + chip('new', 'New · ' + c.newl) + chip('today', 'Due today · ' + c.today) + chip('over', 'Overdue · ' + c.over, true) +
       (c.fresh ? chip('fresh', 'Just added · ' + c.fresh) : '') + chip('ret', 'Returning · ' + c.ret) + chip('closed', 'Closed · ' + c.closed) + chip('all', 'All · ' + c.all) +
       statusSelect() + '</div></div>';
@@ -380,14 +384,14 @@
     var f = fuState(l);
     return '<tr id="lr-' + h(l.id) + '" class="row' + tint(l) + (S.selId === l.id ? ' sel' : '') + '" data-act="open" data-id="' + h(l.id) + '" tabindex="0">' +
       '<td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><strong style="color:var(--blue)">' + h(l.name) + '</strong>' + (isNewSince(l) ? '<span class="tag new">NEW</span>' : '') + (l.returning ? '<span class="tag ret">RETURNING</span>' : '') + '</div><div class="hint" style="margin-top:2px;white-space:nowrap">' + h(['Received ' + shortDate(l.date), l.venue, l.pax].filter(Boolean).join(' · ')) + '</div></td>' +
-      '<td class="c-guests" style="white-space:nowrap">' + h(l.pax || '—') + '</td>' +
-      '<td><span class="pill ' + statusClass(l.status) + '">' + h(l.status) + '</span></td>' +
-      '<td><span class="who">' + av(l.assigned, 28) + '<span>' + h(l.assigned ? l.assigned.split(' ')[0] : 'Unassigned') + '</span></span></td>' +
-      '<td style="font-weight:600;min-width:110px;color:' + (f === 'over' ? 'var(--red)' : (f ? 'var(--blue)' : 'var(--muted)')) + '">' + (f ? h(fuLabel(l.followUp)) : '—') + '</td>' +
-      '<td class="c-contact" style="text-align:right;white-space:nowrap">' + contactLinks(l, true) + '</td></tr>';
+      '<td class="c c-guests" style="white-space:nowrap">' + h(l.pax || '—') + '</td>' +
+      '<td class="c"><span class="pill ' + statusClass(l.status) + '">' + h(l.status) + '</span></td>' +
+      '<td class="c">' + av(l.assigned, 32) + '</td>' +
+      '<td class="c" style="font-weight:600;min-width:110px;color:' + (f === 'over' ? 'var(--red)' : (f ? 'var(--blue)' : 'var(--muted)')) + '">' + (f ? h(fuLabel(l.followUp)) : '—') + '</td>' +
+      '<td class="c c-contact" style="white-space:nowrap">' + contactLinks(l, true) + '</td></tr>';
   }
   function leadTable(list) {
-    return '<div class="lead-table-wrap"><table class="lead-table"><thead><tr><th>Name</th><th class="c-guests">Guests</th><th>Status</th><th>Assigned to</th><th>Follow-up</th><th class="c-contact" style="text-align:right">Contact</th></tr></thead><tbody>' +
+    return '<div class="lead-table-wrap"><table class="lead-table"><thead><tr><th>Name</th><th class="c c-guests">Guests</th><th class="c">Status</th><th class="c">Assigned to</th><th class="c">Follow-up</th><th class="c c-contact">Contact</th></tr></thead><tbody>' +
       list.slice(0, 400).map(leadRow).join('') + '</tbody></table>' + (list.length > 400 ? '<p class="hint" style="padding:12px">Showing 400 of ' + list.length + '. Search to narrow down.</p>' : '') + '</div>';
   }
 
@@ -449,8 +453,9 @@
       (validEmail(l.email) ? '<a class="btn btn-line" href="mailto:' + h(l.email.trim()) + '">' + I.mail + 'Email</a>' : '<span class="btn btn-line" aria-disabled="true" style="opacity:.5">' + I.mail + 'Email</span>') +
       '</div>' +
       '<div class="grid2">' +
-      kv('Guests', l.pax || '—') + kv('Event date', l.when || '—') + kv('Venue', l.venue || '—') +
-      kv('Mobile', d ? prettyPhone(l.mobile) : (l.mobile || '—'), 'sec') + kv('Email', l.email || '—', 'full') + '</div>' +
+      kv('Guests', l.pax || '—') + kv('Event date', l.when || '—') + kv('Venue', l.venue || (l.platform ? '—' : '—')) +
+      (l.budget ? kv('Budget', l.budget, 'sec') + kv('Mobile', d ? prettyPhone(l.mobile) : (l.mobile || '—'), 'full sec') : kv('Mobile', d ? prettyPhone(l.mobile) : (l.mobile || '—'), 'sec')) +
+      kv('Email', l.email || '—', 'full') + '</div>' +
       '<div class="box"><label class="lbl" for="ed-status">Status</label><select id="ed-status" class="inp" data-edit="status">' +
       statuses.map(function (s) { return '<option' + (s === l.status ? ' selected' : '') + '>' + h(s) + '</option>'; }).join('') + '</select>' +
       '<label class="lbl" for="ed-assigned" style="margin-top:4px">Assigned to</label><div style="display:flex;gap:10px;align-items:center"><span id="d-av">' + av(l.assigned, 40) + '</span><select id="ed-assigned" class="inp" data-edit="assigned"><option value="">Unassigned</option>' +
@@ -565,7 +570,8 @@
         '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end"><label class="hint">Team<select class="inp" style="height:40px;margin-top:4px" data-userfield="team" data-user="' + h(u.name) + '">' + ['', 'Events', 'Sales'].concat(u.team && ['Events', 'Sales'].indexOf(u.team) < 0 ? [u.team] : []).map(function (t) { return '<option value="' + h(t) + '"' + (t === (u.team || '') ? ' selected' : '') + '>' + (t || '—') + '</option>'; }).join('') + '</select></label>' +
         '<label class="hint">Email for 10 AM summary<input class="inp" style="height:40px;margin-top:4px" type="email" value="' + h(u.email || '') + '" placeholder="name@hilton.com" data-userfield="email" data-user="' + h(u.name) + '"></label>' +
         '<button class="btn btn-line" style="height:40px;padding:0 12px;font-size:13px" data-act="toggleActive" data-v="' + h(u.name) + '">' + (u.active ? 'Switch off' : 'Switch on') + '</button></div>' +
-        '<label class="hint">Photo link (Google Drive “Anyone with the link” or any image URL)<input class="inp" style="height:40px;margin-top:4px" type="url" value="' + h(u.photo || '') + '" placeholder="https://drive.google.com/file/d/…" data-userfield="photo" data-user="' + h(u.name) + '"></label></article>';
+        '<div style="display:flex;gap:14px;align-items:center"><button class="btn btn-line" style="height:36px;padding:0 14px;font-size:13px" data-act="pickPhoto" data-user="' + h(u.name) + '">' + (photoUrl(u) ? 'Change photo' : 'Upload photo') + '</button>' +
+        (photoUrl(u) ? '<button class="linkish" style="font-size:13px;color:var(--red)" data-act="removePhoto" data-user="' + h(u.name) + '">Remove photo</button>' : '') + '</div></article>';
     }).join('');
     return '<header class="page-head"><div><h1>Team &amp; access</h1><p>Tick a campaign to let that person see its leads and get its notifications</p></div><button class="icon-btn mob-only" data-act="nav" data-v="campaigns" aria-label="Back to campaigns">' + I.back + '</button></header>' +
       '<div class="page">' + (isDesktop() ? '<div class="cards-2">' + cards + '</div>' : cards) +
@@ -657,6 +663,9 @@
     var pushOn = !!pushAppId();
     return '<header class="page-head"><div><h1>Profile</h1><p>' + h(me.name) + ' · ' + (isAdmin() ? 'Admin' : h(me.team || 'Team member')) + '</p></div>' + av(me.name, 48) + '</header>' +
       '<div class="page" style="max-width:640px">' +
+      '<section class="box"><div class="lbl">Your photo</div><div style="display:flex;align-items:center;gap:14px">' + av(me.name, 64) +
+      '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start"><button class="btn btn-blue" style="height:40px;padding:0 16px" data-act="pickPhoto" data-user="' + h(me.name) + '">' + (photoUrl(userBy(me.name)) ? 'Change photo' : 'Upload photo') + '</button>' +
+      (photoUrl(userBy(me.name)) ? '<button class="linkish" style="font-size:13px;color:var(--red)" data-act="removePhoto" data-user="' + h(me.name) + '">Remove photo</button>' : '<span class="hint">Shows next to your leads for the team.</span>') + '</div></div></section>' +
       '<section class="box"><div class="lbl">Notifications</div>' +
       (!pushOn ? '<p class="hint" style="margin:0">Push notifications aren’t switched on for this app yet (admin: add the OneSignal App ID).</p>' :
         perm === 'granted' ? '<p style="margin:0;font-size:14px">On. You’ll hear about new leads, your 10 AM summary and follow-up reminders.</p>' :
@@ -876,6 +885,34 @@
       .catch(function (e) { S.saving = false; render(); toast(e.message, true); });
   }
 
+  // ───────── photos: picked on the device, cropped square and shrunk before upload ─────────
+  function pickPhoto(name) {
+    var inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = function () {
+      var f = inp.files && inp.files[0]; if (!f) return;
+      var url = URL.createObjectURL(f), img = new Image();
+      img.onload = function () {
+        var S2 = 160, c = document.createElement('canvas'); c.width = c.height = S2;
+        var side = Math.min(img.naturalWidth, img.naturalHeight);
+        var ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, S2, S2);
+        ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, S2, S2);
+        URL.revokeObjectURL(url);
+        var q = 0.85, data = c.toDataURL('image/jpeg', q);
+        while (data.length > 40000 && q > 0.4) { q -= 0.1; data = c.toDataURL('image/jpeg', q); }
+        savePhoto(name, data);
+      };
+      img.onerror = function () { toast('That file isn’t a photo we can read', true); };
+      img.src = url;
+    };
+    inp.click();
+  }
+  function savePhoto(name, data) {
+    var u = userBy(name); if (!u) return;
+    var prev = u.photo; u.photo = data; rerenderKeepScroll(); toast(data ? 'Uploading photo…' : 'Removing photo…');
+    api('photoSave', { name: name, photo: data }).then(function () { cacheData(); toast(data ? 'Photo saved' : 'Photo removed'); })
+      .catch(function (e) { u.photo = prev; rerenderKeepScroll(); toast(e.message, true); });
+  }
+
   // ───────── push notifications (OneSignal) ─────────
   function pushAppId() { return C.ONESIGNAL_APP_ID || (D() && D().oneSignalAppId) || ''; }
   var pushStarted = false;
@@ -985,6 +1022,8 @@
   var ACT = {
     nav: function (el) { S.view = el.dataset.v; S.sheet = null; window.scrollTo(0, 0); render(); },
     filter: function (el) { S.filter = S.filter === el.dataset.v && el.dataset.v !== 'open' ? 'open' : el.dataset.v; S.statusF = ''; render(); },
+    pickPhoto: function (el) { pickPhoto(el.dataset.user); },
+    removePhoto: function (el) { if (confirm('Remove this photo?')) savePhoto(el.dataset.user, ''); },
     backLive: function () { S.campaign = null; S.selId = null; window.scrollTo(0, 0); render(); },
     addComment: function () {
       var t = document.getElementById('ed-comment'), text = (t ? t.value : (S.edit && S.edit.comment) || '').trim();
@@ -1169,6 +1208,7 @@
   // hairline under the fixed top bar once the page scrolls
   window.addEventListener('scroll', function () {
     var bar = document.querySelector('.lt,.page-head'); if (bar) bar.classList.toggle('scrolled', window.scrollY > 4);
+    var tb = document.querySelector('.tools-bar'); if (tb) tb.classList.toggle('scrolled', tb.getBoundingClientRect().top <= 0 && window.scrollY > 4);
   }, { passive: true });
   setInterval(function () { if (document.visibilityState === 'visible' && S.token && D()) loadData(true); }, 3 * 60 * 1000);
 
@@ -1296,6 +1336,7 @@
         ['team', 'email', 'active', 'campaigns', 'role', 'photo'].forEach(function (k) { if (b[k] !== undefined) u[k] = b[k]; });
         return {};
       },
+      photoSave: function (x, b) { var a = auth(x, b.token), u = user(x, b.name || a.name); if (a.role !== 'Admin' && u.name !== a.name) throw new Error('You can only change your own photo'); u.photo = b.photo; return {}; },
       resetPin: function (x, b) { var a = auth(x, b.token); if (a.role !== 'Admin') throw new Error('Admin only'); user(x, b.name).pin = ''; return {}; }
     };
     return {
