@@ -239,7 +239,7 @@ table{width:100%;border-collapse:collapse}
 .num{text-align:right}
 
 /* alerts, toast, after-hours */
-.overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.36);display:flex;align-items:center;justify-content:center;padding:24px;animation:fade .2s}
+.overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.5);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:24px;animation:fade .2s}
 @keyframes fade{from{opacity:0}}
 .dialog{width:100%;max-width:340px;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-radius:22px;overflow:hidden;animation:pop .28s var(--spring)}
 @keyframes pop{from{transform:scale(1.08);opacity:0}}
@@ -249,7 +249,9 @@ table{width:100%;border-collapse:collapse}
 .dialog-body{padding:4px 20px 0;display:flex;flex-direction:column}
 .dialog-body p{margin:0 0 18px;font-size:15px;line-height:1.5;color:var(--ink2);text-align:center}
 .dialog-actions{display:flex;flex-direction:column;border-top:.5px solid var(--line);margin:0 -20px}
-.dialog-actions button{height:50px;border:0;background:none;color:var(--blue);font-size:17px}
+.dialog-actions button{height:50px;border:0;background:none;color:var(--blue);font-size:17px;outline:none;-webkit-tap-highlight-color:transparent}
+.dialog-actions button:focus,.dialog-actions button:focus-visible{outline:none;box-shadow:none}
+.dialog-actions button:active{background:rgba(0,0,0,.05)}
 .dialog-actions button+button{border-top:.5px solid var(--line)}
 .dialog-actions .strong{font-weight:600}
 .toast{position:fixed;left:50%;bottom:calc(98px + var(--safe-b));transform:translateX(-50%);z-index:80;background:rgba(28,28,30,.92);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);color:#fff;padding:12px 18px;border-radius:14px;font-size:15px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:calc(100% - 40px);animation:pop .25s var(--spring)}

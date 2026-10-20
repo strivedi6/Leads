@@ -88,7 +88,7 @@
   var S = {
     token: ls('token'), data: null, view: 'leads', campaign: null, filter: 'open', q: '', person: null, statusF: '',
     past: {}, pastLoading: {}, touched: {}, dirty: false,
-    selId: null, edit: null, sheet: null, dashScope: null, dashCamp: undefined,
+    selId: null, edit: null, sheet: null, dashScope: null, dashCamp: null,
     login: { names: null, name: ls('lastName') || '', pin: '', stage: 'enter', first: '', msg: '', err: false, busy: false },
     prevSeen: ls('seen') || 0, saving: false, ahIdx: -1
   };
@@ -280,8 +280,10 @@
   }
 
   function campSelect(sel, act) {
-    var opts = [['__live', 'All live campaigns']];
+    var lives = activeCamps();
+    var opts = [['__live', lives.length === 1 ? lives[0].name + ' · Live' : 'All live campaigns']];
     D().campaigns.forEach(function (c) {
+      if (lives.length === 1 && c.name === lives[0].name) return;   // already the first option
       var state = c.unsorted ? '' : (c.active ? ' · Live' : (c.upcoming ? ' · Upcoming' : ' · Ended'));
       opts.push([c.name, campLabel(c.name) + state]);
     });
@@ -584,7 +586,9 @@
   function dashboardView() {
     var admin = isAdmin();
     var scope = S.dashScope || (admin ? 'team' : 'mine');
-    var camp = S.dashCamp === undefined ? S.campaign : S.dashCamp;
+    var camp = S.dashCamp;   // live campaigns until someone picks another one
+    var lives = activeCamps();
+    var campName = camp == null ? (lives.length === 1 ? lives[0].name : 'All live campaigns') : campLabel(camp);
     var me = D().me.name;
     var src = leadsOf(camp);
     if (camp != null && !src) loadPast(camp);
@@ -629,8 +633,8 @@
       return '<tr><td><strong style="color:var(--blue)">' + h(p) + '</strong></td><td class="num"><b>' + pr.length + '</b></td><td class="num">' + c(function (r) { return /^New/.test(r.s); }) + '</td><td class="num">' + c(function (r) { return /Contacted|Awaiting/.test(r.s); }) + '</td><td class="num">' + c(function (r) { return /Proposal|Qualified|Site|Negotiation|Tentative|Follow/.test(r.s); }) + '</td><td class="num" style="color:var(--teal-ink);font-weight:700">' + c(function (r) { return r.s === 'Confirmed'; }) + '</td><td class="num">' + c(function (r) { return closed.indexOf(r.s) >= 0 && r.s !== 'Confirmed'; }) + '</td></tr>';
     }).join('');
 
-    var head = '<header class="lt"><div class="lt-row"><div><h1>Dashboard</h1><p>' + h(campLabel(camp)) + ' · ' + plural(n, 'lead') + '</p></div></div>' +
-      '<label class="camp-pick"><span class="live-dot"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + h(campLabel(camp)) + '</span>' + I.down + campSelect(camp, 'dashCamp') + '</label>' +
+    var head = '<header class="lt"><div class="lt-row"><div><h1>Dashboard</h1><p>' + h(campName) + ' · ' + plural(n, 'lead') + '</p></div></div>' +
+      '<label class="camp-pick"><span class="live-dot"' + (camp == null || isLiveCamp(camp) ? '' : ' style="background:#AEAEB2"') + '></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + h(campName) + '</span>' + I.down + campSelect(camp, 'dashCamp') + '</label>' +
       (admin ? '' : '<div class="seg" role="tablist" style="margin-top:6px"><button role="tab" aria-selected="' + (scope === 'mine') + '" class="' + (scope === 'mine' ? 'on' : '') + '" data-act="dashScope" data-v="mine">My leads</button><button role="tab" aria-selected="' + (scope === 'team') + '" class="' + (scope === 'team' ? 'on' : '') + '" data-act="dashScope" data-v="team">Team</button></div>') +
       '</header>';
     if (camp != null && !src) return head + '<div class="page"><div class="loading" style="min-height:30vh"><div class="spin"></div>Loading…</div></div>';
@@ -1005,9 +1009,8 @@
     var el = document.createElement('div'); el.id = 'ah'; el.className = 'overlay';
     el.innerHTML = '<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="ah-t"><div class="dialog-top"><div class="moon">' + (S.ahKind === 'early' ? I.sun : I.moon) + '</div>' +
       '<span style="font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">' + DOW[now.getDay()] + ' · ' + timeStr(now) + '</span><h2 id="ah-t">' + h(m[0]) + '</h2></div>' +
-      '<div class="dialog-body"><p>' + h(m[1]) + '</p><div class="dialog-actions"><button class="strong" data-act="ahClose">Got it – I’ll be quick</button><button data-act="ahNext">Show another message</button></div></div></div>';
+      '<div class="dialog-body"><p>' + h(m[1]) + '</p><div class="dialog-actions"><button class="strong" data-act="ahClose">Got it – I’ll be quick</button></div></div></div>';
     document.body.appendChild(el);
-    var b = el.querySelector('button'); if (b) b.focus();
   }
 
   // ───────── toast ─────────
