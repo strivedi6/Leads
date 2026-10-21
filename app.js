@@ -347,7 +347,7 @@
     return Object.keys(names).sort();
   }
   function personSelect() {
-    var opts = [['me', 'My leads'], ['', 'All team']].concat(teamNames().map(function (n) { return [n, n]; })).concat([['__none', 'Unassigned']]);
+    var opts = (isAdmin() ? [['', 'All team']] : [['me', 'My leads'], ['', 'All team']]).concat(teamNames().map(function (n) { return [n, n]; })).concat([['__none', 'Unassigned']]);
     var cur = personOf();
     return '<select aria-label="Whose leads" data-change="person">' + opts.map(function (o) { return '<option value="' + h(o[0]) + '"' + (cur === o[0] ? ' selected' : '') + '>' + h(o[1]) + '</option>'; }).join('') + '</select>';
   }
@@ -366,7 +366,7 @@
     return '<div class="due later">Received ' + h(shortDate(l.date)) + (l.ad ? ' · ' + h(l.ad) : '') + '</div>';
   }
   function metaLine(l) {
-    return [l.venue, l.pax, l.when].filter(Boolean).map(h).join(' · ') || h(l.ad || '');
+    return [l.venue, l.pax, l.when, l.budget].filter(Boolean).map(h).join(' · ') || h(l.ad || '');
   }
   function contactLinks(l, small) {
     var d = digits(l.mobile);
@@ -385,15 +385,16 @@
   function leadRow(l) {
     var f = fuState(l);
     return '<tr id="lr-' + h(l.id) + '" class="row' + tint(l) + (S.selId === l.id ? ' sel' : '') + '" data-act="open" data-id="' + h(l.id) + '" tabindex="0">' +
-      '<td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><strong style="color:var(--blue)">' + h(l.name) + '</strong>' + (isNewSince(l) ? '<span class="tag new">NEW</span>' : '') + (l.returning ? '<span class="tag ret">RETURNING</span>' : '') + '</div><div class="hint" style="margin-top:2px;white-space:nowrap">' + h(['Received ' + shortDate(l.date), l.venue, l.pax].filter(Boolean).join(' · ')) + '</div></td>' +
+      '<td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><strong style="color:var(--blue)">' + h(l.name) + '</strong>' + (isNewSince(l) ? '<span class="tag new">NEW</span>' : '') + (l.returning ? '<span class="tag ret">RETURNING</span>' : '') + '</div><div class="hint" style="margin-top:2px">' + h(['Received ' + shortDate(l.date), l.venue, l.pax].filter(Boolean).join(' · ')) + '</div></td>' +
       '<td class="c c-guests" style="white-space:nowrap">' + h(l.pax || '—') + '</td>' +
+      '<td class="c" style="white-space:nowrap">' + h(l.budget || '—') + '</td>' +
       '<td class="c"><span class="pill ' + statusClass(l.status) + '">' + h(l.status) + '</span></td>' +
       '<td class="c">' + av(l.assigned, 32) + '</td>' +
-      '<td class="c" style="font-weight:600;min-width:110px;color:' + (f === 'over' ? 'var(--red)' : (f ? 'var(--blue)' : 'var(--muted)')) + '">' + (f ? h(fuLabel(l.followUp)) : '—') + '</td>' +
+      '<td class="c" style="font-weight:600;min-width:96px;color:' + (f === 'over' ? 'var(--red)' : (f ? 'var(--blue)' : 'var(--muted)')) + '">' + (f ? h(fuLabel(l.followUp)) : '—') + '</td>' +
       '<td class="c c-contact" style="white-space:nowrap">' + contactLinks(l, true) + '</td></tr>';
   }
   function leadTable(list) {
-    return '<div class="lead-table-wrap"><table class="lead-table"><thead><tr><th>Name</th><th class="c c-guests">Guests</th><th class="c">Status</th><th class="c">Assigned to</th><th class="c">Follow-up</th><th class="c c-contact">Contact</th></tr></thead><tbody>' +
+    return '<div class="lead-table-wrap"><table class="lead-table"><thead><tr><th>Name</th><th class="c c-guests">Guests</th><th class="c">Budget</th><th class="c">Status</th><th class="c">Assigned to</th><th class="c">Follow-up</th><th class="c c-contact">Contact</th></tr></thead><tbody>' +
       list.slice(0, 400).map(leadRow).join('') + '</tbody></table>' + (list.length > 400 ? '<p class="hint" style="padding:12px">Showing 400 of ' + list.length + '. Search to narrow down.</p>' : '') + '</div>';
   }
 
@@ -439,7 +440,8 @@
       '<span class="hint">' + (v ? 'Reminder set – you’ll get a notification at this time.' : 'You’ll get a notification at this time.') + '</span>';
   }
   function peopleFor(l) {
-    var people = D().users.filter(function (u) { return u.active && (u.role === 'Admin' || !u.campaigns || u.campaigns.indexOf('ALL') >= 0 || u.campaigns.indexOf(l.campaign) >= 0); }).map(function (u) { return u.name; });
+    // the admin looks after the app, not the leads, so isn't offered as an assignee
+    var people = D().users.filter(function (u) { return u.active && u.role !== 'Admin' && (!u.campaigns || u.campaigns.indexOf(l.campaign) >= 0); }).map(function (u) { return u.name; });
     if (l.assigned && people.indexOf(l.assigned) < 0) people.unshift(l.assigned);
     return people;
   }
@@ -455,9 +457,8 @@
       (validEmail(l.email) ? '<a class="btn btn-line" href="mailto:' + h(l.email.trim()) + '">' + I.mail + 'Email</a>' : '<span class="btn btn-line" aria-disabled="true" style="opacity:.5">' + I.mail + 'Email</span>') +
       '</div>' +
       '<div class="grid2">' +
-      kv('Guests', l.pax || '—') + kv('Event date', l.when || '—') + kv('Venue', l.venue || (l.platform ? '—' : '—')) +
-      (l.budget ? kv('Budget', l.budget, 'sec') + kv('Mobile', d ? prettyPhone(l.mobile) : (l.mobile || '—'), 'full sec') : kv('Mobile', d ? prettyPhone(l.mobile) : (l.mobile || '—'), 'sec')) +
-      kv('Email', l.email || '—', 'full') + '</div>' +
+      kv('Guests', l.pax || '—') + kv('Event date', l.when || '—') + kv('Venue', l.venue || '—') + kv('Budget', l.budget || '—', 'sec') +
+      kv('Mobile', d ? prettyPhone(l.mobile) : (l.mobile || '—'), 'full sec') + kv('Email', l.email || '—', 'full') + '</div>' +
       '<div class="box"><label class="lbl" for="ed-status">Status</label><select id="ed-status" class="inp" data-edit="status">' +
       statuses.map(function (s) { return '<option' + (s === l.status ? ' selected' : '') + '>' + h(s) + '</option>'; }).join('') + '</select>' +
       '<label class="lbl" for="ed-assigned" style="margin-top:4px">Assigned to</label><div style="display:flex;gap:10px;align-items:center"><span id="d-av">' + av(l.assigned, 40) + '</span><select id="ed-assigned" class="inp" data-edit="assigned"><option value="">Unassigned</option>' +
@@ -1248,6 +1249,7 @@
             venue: /^TGY/.test(ad) ? 'Gourmet Yard' : 'Fursa Ballroom', pax: pick(paxes),
             when: pick(['This Month', 'Next 3 Months', 'Next 3 Months', 'Next 6 Months', 'No Dates Yet']),
             name: fn + ' ' + ln, mobile: '9715' + Math.floor(10000000 + r() * 89999999), email: (fn + '.' + ln + Math.floor(r() * 90 + 10)).toLowerCase() + '@example.com',
+            budget: pick(['', 'AED 150 - 200', 'AED 225 - 275', 'AED 300+']),
             status: st, assigned: pick(who), comments: '', followUp: '', addedAt: new Date(today.getTime() + d * 864e5 + 9 * 36e5).toISOString()
           };
           if (st !== 'New Lead' && r() > 0.3) l.comments = shortDate(rel(d + 1)) + ' (' + l.assigned + '): ' + pick(['Called, sent the package on WhatsApp', 'Wants to visit the ballroom this weekend', 'Budget around AED 150 pp, checking other venues', 'Asked for the Gourmet Yard menu', 'No answer – dropped a WhatsApp message']);
@@ -1265,8 +1267,8 @@
       q4.slice(-2).forEach(function (l) { l.addedAt = new Date(Date.now() - 20 * 60000).toISOString(); l.date = dayKey(new Date()); l.status = 'New Lead'; l.followUp = ''; });
       return { camps: camps, users: users, leads: leads, sessions: {} };
     }
-    function db() { var x = ls('demoDB3'); if (!x) { x = build(); save(x); } return x; }
-    function save(x) { ls('demoDB3', x); }
+    function db() { var x = ls('demoDB4'); if (!x) { x = build(); save(x); } return x; }
+    function save(x) { ls('demoDB4', x); }
     function today() { return dayKey(new Date()); }
     function campView(c) { var t = today(); return { name: c.name, team: c.team, start: c.start, expiry: c.expiry, brief: c.brief, active: (!c.start || c.start <= t) && (!c.expiry || c.expiry >= t), upcoming: !!c.start && c.start > t }; }
     function user(x, name) { return x.users.filter(function (u) { return u.name.toLowerCase() === String(name || '').toLowerCase(); })[0]; }
@@ -1352,7 +1354,7 @@
           }, 220);
         });
       },
-      reset: function () { ls('demoDB3', null); }
+      reset: function () { ls('demoDB4', null); }
     };
   })();
   window.LeadsDemoReset = Demo.reset;
